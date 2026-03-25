@@ -1,0 +1,223 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  EMPLOYEE
+  MANAGER
+  ADMIN
+}
+
+enum Portal {
+  MOBILE
+  WEB
+}
+
+enum OverrideStatus {
+  PRESENT
+  HALF_DAY
+  ABSENT
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum DeviceChangeStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum HolidayChangeType {
+  CREATED
+  UPDATED
+  DELETED
+}
+
+model User {
+  id            String   @id @default(uuid()) @db.Uuid
+  fullName      String   @map("full_name") @db.VarChar(120)
+  email         String   @unique @map("email") @db.VarChar(150)
+  roles         Role[]
+  managerUserId String?  @map("manager_user_id") @db.Uuid
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  manager  User?  @relation("ManagerRelation", fields: [managerUserId], references: [id])
+  reports  User[] @relation("ManagerRelation")
+
+  attendanceProfile          AttendanceProfile?        @relation("UserProfile")
+  attendanceProfileUpdatedBy AttendanceProfile[]       @relation("ProfileUpdatedBy")
+  refreshTokens              RefreshToken[]
+  attendancePunches          AttendancePunch[]
+  regularizations            AttendanceRegularization[] @relation("UserRegularization")
+  regularizationActions      AttendanceRegularization[] @relation("RegularizationAction")
+  leaveRequests              LeaveRequest[]             @relation("UserLeaveRequest")
+  leaveActions               LeaveRequest[]             @relation("LeaveAction")
+  deviceChangeRequests       DeviceChangeRequest[]      @relation("UserDeviceChange")
+  deviceChangeActions        DeviceChangeRequest[]      @relation("DeviceChangeAction")
+  holidaysCreated            Holiday[]                  @relation("HolidayCreatedBy")
+  holidaysUpdated            Holiday[]                  @relation("HolidayUpdatedBy")
+  holidayChangeLogs          HolidayChangeLog[]
+
+  @@map("users")
+}
+
+model AttendanceProfile {
+  userId             String   @id @map("user_id") @db.Uuid
+  boundDeviceId      String?  @map("bound_device_id") @db.VarChar(255)
+  officeLatitude     Decimal? @map("office_latitude") @db.Decimal(10, 8)
+  officeLongitude    Decimal? @map("office_longitude") @db.Decimal(11, 8)
+  officeRadiusMeters Int?     @map("office_radius_meters")
+  updatedByUserId    String?  @map("updated_by_user_id") @db.Uuid
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  user      User  @relation("UserProfile", fields: [userId], references: [id])
+  updatedBy User? @relation("ProfileUpdatedBy", fields: [updatedByUserId], references: [id])
+
+  @@map("attendance_profiles")
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  portal     Portal
+  tokenHash  String    @unique @map("token_hash") @db.VarChar(255)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz()
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz()
+  lastUsedAt DateTime? @map("last_used_at") @db.Timestamptz()
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, portal])
+  @@map("refresh_tokens")
+}
+
+model AttendancePunch {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @map("user_id") @db.Uuid
+  attendanceDate   DateTime  @map("attendance_date") @db.Date
+  punchInAt        DateTime? @map("punch_in_at") @db.Timestamptz()
+  punchOutAt       DateTime? @map("punch_out_at") @db.Timestamptz()
+  workedMinutes    Int?      @map("worked_minutes")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, attendanceDate])
+  @@index([attendanceDate])
+  @@map("attendance_punches")
+}
+
+model AttendanceRegularization {
+  id                    String         @id @default(uuid()) @db.Uuid
+  userId                String         @map("user_id") @db.Uuid
+  attendanceDate        DateTime       @map("attendance_date") @db.Date
+  overrideStatus        OverrideStatus @map("override_status")
+  overridePunchInAt     DateTime?      @map("override_punch_in_at") @db.Timestamptz()
+  overridePunchOutAt    DateTime?      @map("override_punch_out_at") @db.Timestamptz()
+  overrideWorkedMinutes Int?           @map("override_worked_minutes")
+  reason                String         @db.Text
+  actionByUserId        String         @map("action_by_user_id") @db.Uuid
+  createdAt             DateTime       @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt             DateTime       @updatedAt @map("updated_at") @db.Timestamptz()
+
+  user     User @relation("UserRegularization", fields: [userId], references: [id])
+  actionBy User @relation("RegularizationAction", fields: [actionByUserId], references: [id])
+
+  @@unique([userId, attendanceDate])
+  @@map("attendance_regularizations")
+}
+
+model LeaveRequest {
+  id              String      @id @default(uuid()) @db.Uuid
+  userId          String      @map("user_id") @db.Uuid
+  startDate       DateTime    @map("start_date") @db.Date
+  endDate         DateTime    @map("end_date") @db.Date
+  workingDayCount Int         @map("working_day_count")
+  reason          String      @db.Text
+  status          LeaveStatus @default(PENDING)
+  actionByUserId  String?     @map("action_by_user_id") @db.Uuid
+  actionAt        DateTime?   @map("action_at") @db.Timestamptz()
+  actionNote      String?     @map("action_note") @db.Text
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime    @updatedAt @map("updated_at") @db.Timestamptz()
+
+  user     User  @relation("UserLeaveRequest", fields: [userId], references: [id])
+  actionBy User? @relation("LeaveAction", fields: [actionByUserId], references: [id])
+
+  @@index([userId, status])
+  @@index([startDate, endDate])
+  @@map("leave_requests")
+}
+
+model DeviceChangeRequest {
+  id                      String             @id @default(uuid()) @db.Uuid
+  userId                  String             @map("user_id") @db.Uuid
+  currentDeviceIdSnapshot String?            @map("current_device_id_snapshot") @db.VarChar(255)
+  requestedDeviceId       String             @map("requested_device_id") @db.VarChar(255)
+  reason                  String             @db.Text
+  status                  DeviceChangeStatus @default(PENDING)
+  actionByUserId          String?            @map("action_by_user_id") @db.Uuid
+  actionAt                DateTime?          @map("action_at") @db.Timestamptz()
+  actionNote              String?            @map("action_note") @db.Text
+  createdAt               DateTime           @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt               DateTime           @updatedAt @map("updated_at") @db.Timestamptz()
+
+  user     User  @relation("UserDeviceChange", fields: [userId], references: [id])
+  actionBy User? @relation("DeviceChangeAction", fields: [actionByUserId], references: [id])
+
+  @@index([userId, status])
+  @@map("device_change_requests")
+}
+
+model Holiday {
+  id              String    @id @default(uuid()) @db.Uuid
+  title           String    @db.VarChar(120)
+  description     String?   @db.Text
+  startDate       DateTime  @map("start_date") @db.Date
+  endDate         DateTime  @map("end_date") @db.Date
+  isDeleted       Boolean   @default(false) @map("is_deleted")
+  createdByUserId String    @map("created_by_user_id") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedByUserId String?   @map("updated_by_user_id") @db.Uuid
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
+
+  createdBy  User               @relation("HolidayCreatedBy", fields: [createdByUserId], references: [id])
+  updatedBy  User?              @relation("HolidayUpdatedBy", fields: [updatedByUserId], references: [id])
+  changeLogs HolidayChangeLog[]
+
+  @@index([startDate, endDate])
+  @@map("holidays")
+}
+
+model HolidayChangeLog {
+  id             String            @id @default(uuid()) @db.Uuid
+  holidayId      String            @map("holiday_id") @db.Uuid
+  changeType     HolidayChangeType @map("change_type")
+  reason         String            @db.Text
+  changedByUserId String           @map("changed_by_user_id") @db.Uuid
+  changedAt      DateTime          @default(now()) @map("changed_at") @db.Timestamptz()
+  snapshotBefore Json?             @map("snapshot_before") @db.JsonB
+  snapshotAfter  Json?             @map("snapshot_after") @db.JsonB
+
+  holiday   Holiday @relation(fields: [holidayId], references: [id])
+  changedBy User    @relation(fields: [changedByUserId], references: [id])
+
+  @@index([holidayId])
+  @@map("holiday_change_logs")
+}
