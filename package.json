@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "node --watch --env-file=.env src/server.js",
-    "build": "prisma generate && prisma migrate deploy && node scripts/init-admin.js",
+    "build": "npm install && prisma generate && prisma migrate deploy && node scripts/init-admin.js",
     "start": "node src/server.js"
   },
   "dependencies": {
