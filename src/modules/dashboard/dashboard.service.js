@@ -181,7 +181,8 @@ export async function getMobileDashboard(userId) {
     absentDays = 0,
     leaveDays = 0,
     holidayDays = 0,
-    weeklyOffDays = 0;
+    weeklyOffDays = 0,
+    totalWorkMinutes = 0;
   for (const date of summaryDates) {
     if (isWeeklyOff(date)) {
       weeklyOffDays++;
@@ -197,9 +198,15 @@ export async function getMobileDashboard(userId) {
     }
     const reg = regMap.get(date);
     if (reg) {
-      if (reg.overrideStatus === OverrideStatus.PRESENT) presentDays++;
-      else if (reg.overrideStatus === OverrideStatus.HALF_DAY) halfDays++;
-      else absentDays++;
+      if (reg.overrideStatus === OverrideStatus.PRESENT) {
+        presentDays++;
+        totalWorkMinutes += reg.overrideWorkedMinutes || 0;
+      } else if (reg.overrideStatus === OverrideStatus.HALF_DAY) {
+        halfDays++;
+        totalWorkMinutes += reg.overrideWorkedMinutes || 0;
+      } else {
+        absentDays++;
+      }
       continue;
     }
     const punch = punchMap.get(date);
@@ -207,20 +214,27 @@ export async function getMobileDashboard(userId) {
       if (
         punch.workedMinutes != null &&
         punch.workedMinutes >= FULL_DAY_MINUTES
-      )
+      ) {
         presentDays++;
-      else halfDays++;
+        totalWorkMinutes += punch.workedMinutes || 0;
+      } else {
+        halfDays++;
+        totalWorkMinutes += punch.workedMinutes || 0;
+      }
     } else if (punch && (punch.punchInAt || punch.punchOutAt)) {
       halfDays++;
+      totalWorkMinutes += punch.workedMinutes || 0;
     } else {
       absentDays++;
     }
   }
   // Attendance percentage considers present + half-day weighting only.
-  const denominator = presentDays + halfDays + absentDays;
-  const numerator = presentDays + halfDays * 0.5;
+  // const denominator = presentDays + halfDays + absentDays;
+  const expectedWorkMinutes = (presentDays + halfDays + absentDays) * 9 * 60;
   const attendancePercentage =
-    denominator > 0 ? Math.round((numerator / denominator) * 10000) / 100 : 0;
+    totalWorkMinutes > 0
+      ? Math.round((expectedWorkMinutes / totalWorkMinutes) * 10000) / 100
+      : 0;
   const monthSummary = {
     presentDays,
     halfDays,

@@ -676,10 +676,11 @@ export async function getWebAttendanceOverview(callerRoles, callerId, filters) {
         absentDays++;
       }
     }
-    const denominator = presentDays + halfDays + absentDays;
-    const numerator = presentDays + halfDays * 0.5;
+    const expectedWorkMinutes = (presentDays + halfDays + absentDays) * 9 * 60;
     const attendancePercentage =
-      denominator > 0 ? Math.round((numerator / denominator) * 10000) / 100 : 0;
+      totalWorkedMinutes > 0
+        ? Math.round((expectedWorkMinutes / totalWorkedMinutes) * 10000) / 100
+        : 0;
     return {
       user: { id: user.id, fullName: user.fullName, email: user.email },
       summary: {
