@@ -438,7 +438,20 @@ export async function getUserAttendanceOverview(
 ) {
   const prisma = getPrisma();
   const today = businessToday();
-  const effectiveStart = startDate || businessMonthStart();
+  // Fetch user to get their createdAt date - we should not count days before user was created
+  const userRecord = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { createdAt: true },
+  });
+  const userCreatedDate = userRecord?.createdAt
+    ? userRecord.createdAt.toISOString().slice(0, 10)
+    : null;
+  const requestedStart = startDate || businessMonthStart();
+  // Only consider dates from user's creation date onwards
+  const effectiveStart =
+    userCreatedDate && userCreatedDate > requestedStart
+      ? userCreatedDate
+      : requestedStart;
   let effectiveEnd =
     endDate == null ? clampEndDate(today) : clampEndDate(endDate);
   const { appliedEndDate, currentDateExcluded } = clampEndDate(effectiveEnd);
@@ -550,7 +563,13 @@ export async function getWebAttendanceOverview(callerRoles, callerId, filters) {
     prisma.user.count({ where }),
     prisma.user.findMany({
       where,
-      select: { id: true, fullName: true, email: true, roles: true },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        roles: true,
+        createdAt: true,
+      },
       orderBy: { fullName: "asc" },
       skip: (filters.page - 1) * filters.limit,
       take: filters.limit,
@@ -602,6 +621,10 @@ export async function getWebAttendanceOverview(callerRoles, callerId, filters) {
     const userPunches = punchesByUserId.get(user.id) || new Map();
     const userRegs = regularizationsByUserId.get(user.id) || new Map();
     const userLeaveDates = leaveDatesByUserId.get(user.id) || new Map();
+    // Only consider dates from user's creation date onwards
+    const userCreatedDate = user.createdAt
+      ? user.createdAt.toISOString().slice(0, 10)
+      : null;
     let presentDays = 0,
       halfDays = 0,
       absentDays = 0,
@@ -611,6 +634,10 @@ export async function getWebAttendanceOverview(callerRoles, callerId, filters) {
       totalWorkedMinutes = 0;
     const { FULL_DAY_MINUTES } = env();
     for (const date of dates) {
+      // Skip dates before user was created
+      if (userCreatedDate && date < userCreatedDate) {
+        continue;
+      }
       if (isWeeklyOff(date)) {
         weeklyOffDays++;
         continue;
@@ -730,6 +757,7 @@ export async function getWebAttendanceRecords(callerRoles, callerId, filters) {
       id: true,
       fullName: true,
       email: true,
+      createdAt: true,
       attendanceProfile: {
         select: {
           officeLatitude: true,
@@ -804,7 +832,15 @@ export async function getWebAttendanceRecords(callerRoles, callerId, filters) {
     const userLocation = serializeAttendanceProfileLocation(
       user.attendanceProfile,
     );
+    // Only consider dates from user's creation date onwards
+    const userCreatedDate = user.createdAt
+      ? user.createdAt.toISOString().slice(0, 10)
+      : null;
     for (const date of dates) {
+      // Skip dates before user was created
+      if (userCreatedDate && date < userCreatedDate) {
+        continue;
+      }
       const day = buildAttendanceDay(
         date,
         userPunches.get(date),
