@@ -232,9 +232,7 @@ export async function getMobileDashboard(userId) {
   // const denominator = presentDays + halfDays + absentDays;
   const expectedWorkMinutes = (presentDays + halfDays + absentDays) * 9 * 60;
   const attendancePercentage =
-    totalWorkMinutes > 0
-      ? Math.round((expectedWorkMinutes / totalWorkMinutes) * 10000) / 100
-      : 0;
+    totalWorkMinutes > 0 ? (expectedWorkMinutes / totalWorkMinutes) * 100 : 0;
   const monthSummary = {
     presentDays,
     halfDays,
