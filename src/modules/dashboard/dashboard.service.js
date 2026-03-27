@@ -10,6 +10,7 @@ import {
   businessToday,
   businessYesterday,
   businessMonthStart,
+  businessMonthEnd,
   dateRange,
   isWeeklyOff,
   clampEndDate,
@@ -30,6 +31,7 @@ export async function getMobileDashboard(userId) {
   const today = businessToday();
   const yesterday = businessYesterday();
   const monthStart = businessMonthStart();
+  const monthEnd = businessMonthEnd();
   // Basic profile card shown at top of mobile dashboard.
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -134,8 +136,21 @@ export async function getMobileDashboard(userId) {
       where: {
         userId,
         status: LeaveStatus.APPROVED,
-        startDate: { lte: new Date(appliedEndDate) },
-        endDate: { gte: new Date(monthStart) },
+        /** a logic for selecting all leaves which has a date in current month even if start and end dates are outside the month */
+        OR: [
+          {
+            startDate: { lte: new Date(monthEnd) },
+            endDate: { gte: new Date(monthStart) },
+          },
+          {
+            startDate: { lte: new Date(monthStart) },
+            endDate: { gte: new Date(monthStart) },
+          },
+          {
+            startDate: { lte: new Date(monthEnd) },
+            endDate: { gte: new Date(monthEnd) },
+          },
+        ],
       },
     }),
     prisma.holiday.findMany({
@@ -172,6 +187,7 @@ export async function getMobileDashboard(userId) {
       l.endDate.toISOString().slice(0, 10),
     );
     for (const d of lDates) {
+      if (d > monthEnd || d < monthStart) continue; // Skip leave dates beyond current month end
       if (!isWeeklyOff(d) && !holidayDateSet.has(d)) leaveDateSet.add(d);
     }
   }
@@ -336,7 +352,7 @@ export async function getWebDashboard(
     // Admin accounts are not part of attendance aggregates.
     NOT: { roles: { has: Role.ADMIN } },
   };
-  const headcount = await prisma.user.count({ where: userWhere });
+  const headcount = await prisma.user.count({ where: attendanceUserWhere });
   // Pending leave count
   // Pending queues are separately counted for high-signal dashboard cards.
   const pendingLeaveWhere = { status: LeaveStatus.PENDING };
