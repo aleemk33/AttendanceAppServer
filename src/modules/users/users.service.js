@@ -48,8 +48,9 @@ export async function listUsers(callerRoles, callerId, filters) {
   if (filters.isActive !== undefined) {
     where.isActive = filters.isActive;
   }
-  // filter admins in query as they should not be counted in.
-  where.roles = { not: { has: Role.ADMIN } };
+  // Prisma list-enum filters do not support nested `not`, so exclude admins
+  // with a top-level NOT while preserving any explicit role filter above.
+  where.NOT = { roles: { has: Role.ADMIN } };
 
   // Query count + page in parallel for latency.
   const [total, users] = await Promise.all([
