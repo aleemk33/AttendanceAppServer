@@ -48,7 +48,11 @@ function buildHolidayDateMap(holidays) {
   return map;
 }
 function buildAttendanceScopeWhere(callerRoles, callerId, search) {
-  const where = { isActive: true };
+  const where = {
+    isActive: true,
+    // Admin accounts are out of scope for attendance reporting.
+    NOT: { roles: { has: Role.ADMIN } },
+  };
   if (callerRoles.includes(Role.MANAGER) && !callerRoles.includes(Role.ADMIN)) {
     where.managerUserId = callerId;
   }
@@ -660,8 +664,8 @@ export async function getWebAttendanceOverview(callerRoles, callerId, filters) {
       }
       const punch = userPunches.get(date);
       if (punch) {
-        totalWorkedMinutes += punch.workedMinutes ?? 0;
         if (punch.punchInAt && punch.punchOutAt) {
+          totalWorkedMinutes += punch.workedMinutes ?? 0;
           if (
             punch.workedMinutes != null &&
             punch.workedMinutes >= FULL_DAY_MINUTES
@@ -670,6 +674,7 @@ export async function getWebAttendanceOverview(callerRoles, callerId, filters) {
           else halfDays++;
         } else {
           // Incomplete punch record is treated as half day by policy.
+          totalWorkedMinutes += 4.5 * 60;
           halfDays++;
         }
       } else {

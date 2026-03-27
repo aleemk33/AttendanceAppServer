@@ -223,7 +223,7 @@ export async function getMobileDashboard(userId) {
       }
     } else if (punch && (punch.punchInAt || punch.punchOutAt)) {
       halfDays++;
-      totalWorkMinutes += punch.workedMinutes || 0;
+      totalWorkMinutes += 4.5 * 60; // Assume half-day for single punch; can be adjusted based on business rules.
     } else {
       absentDays++;
     }
@@ -331,6 +331,11 @@ export async function getWebDashboard(
   if (callerRoles.includes(Role.MANAGER) && !callerRoles.includes(Role.ADMIN)) {
     userWhere.managerUserId = callerId;
   }
+  const attendanceUserWhere = {
+    ...userWhere,
+    // Admin accounts are not part of attendance aggregates.
+    NOT: { roles: { has: Role.ADMIN } },
+  };
   const headcount = await prisma.user.count({ where: userWhere });
   // Pending leave count
   // Pending queues are separately counted for high-signal dashboard cards.
@@ -358,7 +363,7 @@ export async function getWebDashboard(
   });
   // Aggregate attendance summary through appliedEndDate (usually yesterday).
   const users = await prisma.user.findMany({
-    where: userWhere,
+    where: attendanceUserWhere,
     select: { id: true, createdAt: true },
   });
   // If team size is zero, downstream aggregations naturally resolve to zero values.
