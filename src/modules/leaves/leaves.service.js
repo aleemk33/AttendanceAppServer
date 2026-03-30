@@ -52,7 +52,7 @@ export async function createLeaveRequest(userId, data) {
   }
   if (data.startDate === today) {
     // check the punch-in status to prevent same-day leave abuse
-    const attendance = await prisma.attendance.findUnique({
+    const attendance = await prisma.attendancePunch.findUnique({
       where: { userId_date: { userId, date: new Date(today) } },
     });
     if (attendance?.punchInTime) {
