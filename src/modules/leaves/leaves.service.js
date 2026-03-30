@@ -57,7 +57,7 @@ export async function createLeaveRequest(userId, data) {
         userId_attendanceDate: { userId, attendanceDate: new Date(today) },
       },
     });
-    if (attendance?.punchInTime) {
+    if (attendance?.punchInAt) {
       throw new BadRequestError("Cannot start leave today after punching in");
     }
   }
