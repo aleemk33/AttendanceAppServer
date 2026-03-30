@@ -53,7 +53,9 @@ export async function createLeaveRequest(userId, data) {
   if (data.startDate === today) {
     // check the punch-in status to prevent same-day leave abuse
     const attendance = await prisma.attendancePunch.findUnique({
-      where: { userId_date: { userId, date: new Date(today) } },
+      where: {
+        userId_attendanceDate: { userId, attendanceDate: new Date(today) },
+      },
     });
     if (attendance?.punchInTime) {
       throw new BadRequestError("Cannot start leave today after punching in");
