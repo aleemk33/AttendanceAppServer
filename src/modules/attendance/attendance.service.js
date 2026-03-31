@@ -195,6 +195,7 @@ function buildAttendanceDay(
           : "halfDay";
     } else if (punch.punchInAt && !punch.punchOutAt) {
       attendanceState = "halfDay";
+      punch.workedMinutes = 4.5 * 60; // Assume half day worked for incomplete punches.
       flags.push("missingPunchOut");
     } else if (!punch.punchInAt && punch.punchOutAt) {
       attendanceState = "halfDay";
