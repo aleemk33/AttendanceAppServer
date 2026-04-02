@@ -191,8 +191,22 @@ export async function listLeaveRequestsWeb(callerRoles, callerId, filters) {
     where.user = { managerUserId: callerId };
   }
   if (filters.status) where.status = filters.status;
-  if (filters.startDate) where.startDate = { gte: new Date(filters.startDate) };
-  if (filters.endDate) where.endDate = { lte: new Date(filters.endDate) };
+
+  if (filters.startDate || filters.endDate) {
+    const dateFilter = {};
+    if (filters.startDate && filters.endDate) {
+      dateFilter.AND = [
+        { startDate: { lte: new Date(filters.endDate) } },
+        { endDate: { gte: new Date(filters.startDate) } },
+      ];
+    } else if (filters.startDate) {
+      dateFilter.endDate = { gte: new Date(filters.startDate) };
+    } else if (filters.endDate) {
+      dateFilter.startDate = { lte: new Date(filters.endDate) };
+    }
+    where.AND = [...(where.AND || []), ...(Array.isArray(dateFilter.AND) ? [{ AND: dateFilter.AND }] : [dateFilter])];
+  }
+  
   if (filters.search) {
     where.user = {
       ...where.user,
