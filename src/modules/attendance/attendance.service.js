@@ -752,7 +752,9 @@ export async function getWebAttendanceRecords(callerRoles, callerId, filters) {
   const today = businessToday();
   const effectiveStart = filters.startDate || businessMonthStart();
   const requestedEndDate = filters.endDate || today;
-  const effectiveEnd = clampEndDate(requestedEndDate).appliedEndDate;
+  // Unlike overview endpoints, the records table can show in-progress attendance
+  // rows for today once the user has at least punched in.
+  const effectiveEnd = requestedEndDate > today ? today : requestedEndDate;
   const where = buildAttendanceScopeWhere(
     callerRoles,
     callerId,
@@ -860,6 +862,10 @@ export async function getWebAttendanceRecords(callerRoles, callerId, filters) {
           location: userLocation,
         },
       );
+      // Avoid returning empty "today" rows for every user before they punch in.
+      if (date === today && !day.punchInAt) {
+        continue;
+      }
       if (!matchesAttendanceStatus(day, filters.status)) {
         continue;
       }
