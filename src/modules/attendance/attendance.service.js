@@ -22,6 +22,12 @@ import {
   isToday,
   isPast,
   haversineMeters,
+  getHolidaysInRange,
+  buildHolidayDateMap,
+  buildAttendanceScopeWhere,
+  isManagerOnly,
+  buildDateKeyedMap,
+  buildDateKeyedMapsByUserId,
 } from "../../common/index.js";
 import {
   upsertSummaryFromPunch,
@@ -30,112 +36,8 @@ import {
   getAggregateWorkedMinutes,
   getEffectiveSummaryWorkedMinutes,
 } from "./attendance-summary.service.js";
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-async function getHolidaysInRange(startDate, endDate) {
-  const prisma = getPrisma();
-  return prisma.holiday.findMany({
-    where: {
-      isDeleted: false,
-      startDate: { lte: new Date(endDate) },
-      endDate: { gte: new Date(startDate) },
-    },
-  });
-}
-/**
- * Expands holiday rows to a day-level map:
- * key   -> YYYY-MM-DD
- * value -> holiday identity used in response payload
- */
-function buildHolidayDateMap(holidays) {
-  const map = new Map();
-  for (const h of holidays) {
-    // Expand each holiday span to day-level lookup for O(1) checks later.
-    const dates = dateRange(
-      h.startDate.toISOString().slice(0, 10),
-      h.endDate.toISOString().slice(0, 10),
-    );
-    for (const d of dates) {
-      map.set(d, { id: h.id, title: h.title });
-    }
-  }
-  return map;
-}
-function buildAttendanceScopeWhere(callerRoles, callerId, search) {
-  const where = {
-    isActive: true,
-    // Admin accounts are out of scope for attendance reporting.
-    NOT: { roles: { has: Role.ADMIN } },
-  };
-  if (callerRoles.includes(Role.MANAGER) && !callerRoles.includes(Role.ADMIN)) {
-    where.managerUserId = callerId;
-  }
-  if (search) {
-    where.OR = [
-      { fullName: { contains: search, mode: "insensitive" } },
-      { email: { contains: search, mode: "insensitive" } },
-    ];
-  }
-  return where;
-}
-function buildApprovedLeaveDateMap(leaves, holidayMap) {
-  const map = new Map();
-  for (const leave of leaves) {
-    if (leave.status !== LeaveStatus.APPROVED) {
-      continue;
-    }
-    const leaveDates = dateRange(
-      leave.startDate.toISOString().slice(0, 10),
-      leave.endDate.toISOString().slice(0, 10),
-    );
-    for (const date of leaveDates) {
-      if (!isWeeklyOff(date) && !holidayMap.has(date)) {
-        map.set(date, { id: leave.id, status: leave.status });
-      }
-    }
-  }
-  return map;
-}
-function buildDateKeyedMap(records) {
-  return new Map(
-    records.map((record) => [
-      record.attendanceDate.toISOString().slice(0, 10),
-      record,
-    ]),
-  );
-}
-function buildDateKeyedMapsByUserId(records) {
-  const map = new Map();
-  for (const record of records) {
-    const date = record.attendanceDate.toISOString().slice(0, 10);
-    if (!map.has(record.userId)) {
-      map.set(record.userId, new Map());
-    }
-    map.get(record.userId).set(date, record);
-  }
-  return map;
-}
-function buildApprovedLeaveDateMapsByUserId(leaves, holidayMap) {
-  const map = new Map();
-  for (const leave of leaves) {
-    if (leave.status !== LeaveStatus.APPROVED) {
-      continue;
-    }
-    const leaveDates = dateRange(
-      leave.startDate.toISOString().slice(0, 10),
-      leave.endDate.toISOString().slice(0, 10),
-    );
-    if (!map.has(leave.userId)) {
-      map.set(leave.userId, new Map());
-    }
-    const userLeaveMap = map.get(leave.userId);
-    for (const date of leaveDates) {
-      if (!isWeeklyOff(date) && !holidayMap.has(date)) {
-        userLeaveMap.set(date, { id: leave.id, status: leave.status });
-      }
-    }
-  }
-  return map;
-}
 function serializeAttendanceProfileLocation(profile) {
   if (
     !profile ||

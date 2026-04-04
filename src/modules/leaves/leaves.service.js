@@ -1,4 +1,4 @@
-import { LeaveStatus, Role } from "@prisma/client";
+import { LeaveStatus } from "@prisma/client";
 import { getPrisma } from "../../config/database.js";
 import {
   BadRequestError,
@@ -11,31 +11,13 @@ import {
   countWorkingDays,
   dateRange,
   isWeeklyOff,
+  getHolidayDatesInRange,
+  isManagerOnly,
+  toDateKey,
 } from "../../common/index.js";
 import { paginate, paginationMeta } from "../../common/pagination.js";
-import {
-  upsertSummaryFromApprovedLeave,
-} from "../attendance/attendance-summary.service.js";
-// Expands holidays in range into a date set for fast leave-day calculations.
-async function getHolidayDatesInRange(startDate, endDate) {
-  const prisma = getPrisma();
-  const holidays = await prisma.holiday.findMany({
-    where: {
-      isDeleted: false,
-      startDate: { lte: new Date(endDate) },
-      endDate: { gte: new Date(startDate) },
-    },
-  });
-  const set = new Set();
-  for (const h of holidays) {
-    const dates = dateRange(
-      h.startDate.toISOString().slice(0, 10),
-      h.endDate.toISOString().slice(0, 10),
-    );
-    for (const d of dates) set.add(d);
-  }
-  return set;
-}
+import { upsertSummaryFromApprovedLeave } from "../attendance/attendance-summary.service.js";
+
 /**
  * Creates a leave request for future dates.
  *
@@ -91,8 +73,8 @@ export async function createLeaveRequest(userId, data) {
     // Check if any working days actually overlap
     for (const existing of overlapping) {
       const existingDates = dateRange(
-        existing.startDate.toISOString().slice(0, 10),
-        existing.endDate.toISOString().slice(0, 10),
+        toDateKey(existing.startDate),
+        toDateKey(existing.endDate),
       );
       const existingWorkingDates = existingDates.filter(
         (d) => !isWeeklyOff(d) && !holidayDates.has(d),
@@ -190,7 +172,7 @@ export async function listLeaveRequestsWeb(callerRoles, callerId, filters) {
   const prisma = getPrisma();
   const where = {};
   // Managers can act only on direct reports; admins get organization-wide view.
-  if (callerRoles.includes(Role.MANAGER) && !callerRoles.includes(Role.ADMIN)) {
+  if (isManagerOnly(callerRoles)) {
     where.user = { managerUserId: callerId };
   }
   if (filters.status) where.status = filters.status;
@@ -207,9 +189,14 @@ export async function listLeaveRequestsWeb(callerRoles, callerId, filters) {
     } else if (filters.endDate) {
       dateFilter.startDate = { lte: new Date(filters.endDate) };
     }
-    where.AND = [...(where.AND || []), ...(Array.isArray(dateFilter.AND) ? [{ AND: dateFilter.AND }] : [dateFilter])];
+    where.AND = [
+      ...(where.AND || []),
+      ...(Array.isArray(dateFilter.AND)
+        ? [{ AND: dateFilter.AND }]
+        : [dateFilter]),
+    ];
   }
-  
+
   if (filters.search) {
     where.user = {
       ...where.user,
@@ -258,7 +245,7 @@ export async function approveLeaveRequest(
     throw new ForbiddenError("Cannot approve your own leave request");
   }
   // Manager scope
-  if (callerRoles.includes(Role.MANAGER) && !callerRoles.includes(Role.ADMIN)) {
+  if (isManagerOnly(callerRoles)) {
     if (leave.user.managerUserId !== callerId) {
       throw new ForbiddenError("You can only approve direct reports' leave");
     }
@@ -304,7 +291,7 @@ export async function rejectLeaveRequest(
   if (leave.userId === callerId) {
     throw new ForbiddenError("Cannot reject your own leave request");
   }
-  if (callerRoles.includes(Role.MANAGER) && !callerRoles.includes(Role.ADMIN)) {
+  if (isManagerOnly(callerRoles)) {
     if (leave.user.managerUserId !== callerId) {
       throw new ForbiddenError("You can only reject direct reports' leave");
     }

@@ -13,6 +13,12 @@ import {
   dateRange,
   isWeeklyOff,
   clampEndDate,
+  getHolidaysInRange,
+  buildHolidayDateMap,
+  isManagerOnly,
+  toDateKey,
+  buildDateKeyedMap,
+  buildDateKeyedMapsByUserId,
 } from "../../common/index.js";
 import {
   getAggregateWorkedMinutes,
@@ -48,12 +54,12 @@ export async function getMobileDashboard(userId) {
     },
   });
   // Only consider dates from user's creation date onwards
-  const userCreatedDate = user?.createdAt
-    ? user.createdAt.toISOString().slice(0, 10)
-    : null;
+  const userCreatedDate = user?.createdAt ? toDateKey(user.createdAt) : null;
   // Today's live status - check today's summary row first
   const todaySummary = await prisma.attendanceSummary.findUnique({
-    where: { userId_attendanceDate: { userId, attendanceDate: new Date(today) } },
+    where: {
+      userId_attendanceDate: { userId, attendanceDate: new Date(today) },
+    },
   });
   // Status precedence is applied sequentially; later checks overwrite earlier status.
   let todayStatus = { date: today, status: "notPunchedIn" };
@@ -100,13 +106,13 @@ export async function getMobileDashboard(userId) {
     todaySummary?.status === AttendanceSummaryStatus.ON_LEAVE
       ? true
       : await prisma.leaveRequest.findFirst({
-      where: {
-        userId,
-        status: LeaveStatus.APPROVED,
-        startDate: { lte: new Date(today) },
-        endDate: { gte: new Date(today) },
-      },
-    });
+          where: {
+            userId,
+            status: LeaveStatus.APPROVED,
+            startDate: { lte: new Date(today) },
+            endDate: { gte: new Date(today) },
+          },
+        });
   if (todayLeave) {
     todayStatus = { date: today, status: "onLeave" };
   }
@@ -128,26 +134,12 @@ export async function getMobileDashboard(userId) {
         },
       },
     }),
-    prisma.holiday.findMany({
-      where: {
-        isDeleted: false,
-        startDate: { lte: new Date(appliedEndDate) },
-        endDate: { gte: new Date(monthStart) },
-      },
-    }),
+    getHolidaysInRange(monthStart, appliedEndDate),
   ]);
-  const summaryMap = new Map(
-    summaries.map((s) => [s.attendanceDate.toISOString().slice(0, 10), s]),
-  );
-  // Expand holiday ranges into date-level lookup.
-  const holidayDateSet = new Set();
-  for (const h of holidays) {
-    const hDates = dateRange(
-      h.startDate.toISOString().slice(0, 10),
-      h.endDate.toISOString().slice(0, 10),
-    );
-    for (const d of hDates) holidayDateSet.add(d);
-  }
+  const summaryMap = buildDateKeyedMap(summaries);
+  // Build holiday date set for fast lookup
+  const holidayDateMap = buildHolidayDateMap(holidays);
+  const holidayDateSet = new Set(holidayDateMap.keys());
   let presentDays = 0,
     halfDays = 0,
     absentDays = 0,
@@ -237,7 +229,7 @@ export async function getMobileDashboard(userId) {
     // Decrement cursor
     const dt = new Date(cursor);
     dt.setDate(dt.getDate() - 1);
-    cursor = dt.toISOString().slice(0, 10);
+    cursor = toDateKey(dt);
   }
   // Short list to drive "pending approvals" UI chips.
   const pendingLeaves = await prisma.leaveRequest.findMany({
@@ -284,7 +276,7 @@ export async function getWebDashboard(
   const { appliedEndDate, currentDateExcluded } = clampEndDate(rawEnd);
   // Manager vs admin scope.
   const userWhere = { isActive: true };
-  if (callerRoles.includes(Role.MANAGER) && !callerRoles.includes(Role.ADMIN)) {
+  if (isManagerOnly(callerRoles)) {
     userWhere.managerUserId = callerId;
   }
   const attendanceUserWhere = {
@@ -323,10 +315,7 @@ export async function getWebDashboard(
   });
   const userIds = users.map((u) => u.id);
   const userCreatedDateMap = new Map(
-    users.map((u) => [
-      u.id,
-      u.createdAt ? u.createdAt.toISOString().slice(0, 10) : null,
-    ]),
+    users.map((u) => [u.id, u.createdAt ? toDateKey(u.createdAt) : null]),
   );
   const dates = dateRange(effectiveStart, appliedEndDate);
   const [summaries, holidays] = await Promise.all([
@@ -339,31 +328,12 @@ export async function getWebDashboard(
         },
       },
     }),
-    prisma.holiday.findMany({
-      where: {
-        isDeleted: false,
-        startDate: { lte: new Date(appliedEndDate) },
-        endDate: { gte: new Date(effectiveStart) },
-      },
-    }),
+    getHolidaysInRange(effectiveStart, appliedEndDate),
   ]);
-  // Expand holidays into date set
-  const holidayDateSet = new Set();
-  for (const h of holidays) {
-    const hd = dateRange(
-      h.startDate.toISOString().slice(0, 10),
-      h.endDate.toISOString().slice(0, 10),
-    );
-    for (const d of hd) holidayDateSet.add(d);
-  }
-  // Build summary lookup by userId -> date -> summary
-  const summariesByUserId = new Map();
-  for (const s of summaries) {
-    if (!summariesByUserId.has(s.userId)) {
-      summariesByUserId.set(s.userId, new Map());
-    }
-    summariesByUserId.get(s.userId).set(s.attendanceDate.toISOString().slice(0, 10), s);
-  }
+  // Use shared utilities for holiday and summary maps
+  const holidayDateMap = buildHolidayDateMap(holidays);
+  const holidayDateSet = new Set(holidayDateMap.keys());
+  const summariesByUserId = buildDateKeyedMapsByUserId(summaries);
   let totalPresent = 0,
     totalHalf = 0,
     totalAbsent = 0,

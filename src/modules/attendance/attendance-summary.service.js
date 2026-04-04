@@ -7,7 +7,13 @@ import {
 } from "@prisma/client";
 import { getPrisma } from "../../config/database.js";
 import { env } from "../../config/env.js";
-import { isToday, isWeeklyOff, dateRange } from "../../common/index.js";
+import {
+  isToday,
+  isWeeklyOff,
+  dateRange,
+  getHolidayDatesInRange,
+  toDateKey,
+} from "../../common/index.js";
 
 // Keep parity with the current server behavior: LEAVE > REGULARIZATION > PUNCH.
 const SOURCE_PRIORITY = {
@@ -18,12 +24,6 @@ const SOURCE_PRIORITY = {
 
 function getSourcePriority(source) {
   return SOURCE_PRIORITY[source] || 0;
-}
-
-function toDateKey(value) {
-  return typeof value === "string"
-    ? value.slice(0, 10)
-    : value.toISOString().slice(0, 10);
 }
 
 function buildSummaryKey(userId, date) {
@@ -184,32 +184,10 @@ export function getAggregateWorkedMinutes(date, summary) {
   }
 }
 
-async function getHolidayDatesInRange(startDate, endDate, db = getPrisma()) {
-  const holidays = await db.holiday.findMany({
-    where: {
-      isDeleted: false,
-      startDate: { lte: new Date(endDate) },
-      endDate: { gte: new Date(startDate) },
-    },
-  });
-
-  const set = new Set();
-  for (const holiday of holidays) {
-    const dates = dateRange(
-      holiday.startDate.toISOString().slice(0, 10),
-      holiday.endDate.toISOString().slice(0, 10),
-    );
-    for (const date of dates) {
-      set.add(date);
-    }
-  }
-  return set;
-}
-
 async function getEffectiveApprovedLeaveDates(leaveRequest, db = getPrisma()) {
   const leaveDates = dateRange(
-    leaveRequest.startDate.toISOString().slice(0, 10),
-    leaveRequest.endDate.toISOString().slice(0, 10),
+    toDateKey(leaveRequest.startDate),
+    toDateKey(leaveRequest.endDate),
   );
   const holidayDates = await getHolidayDatesInRange(
     leaveRequest.startDate,
