@@ -215,6 +215,7 @@ export async function getMobileDashboard(userId) {
             status = "present";
             break;
           case AttendanceSummaryStatus.HALF_DAY:
+          case AttendanceSummaryStatus.WORKING:
             status = "halfDay";
             break;
           case AttendanceSummaryStatus.ABSENT:

@@ -171,18 +171,18 @@ async function getEffectiveApprovedLeaveDates(leaveRequest, db = getPrisma()) {
   );
 }
 
-// async function createSummariesInBatches(rows, db) {
-//   if (rows.length === 0) {
-//     return;
-//   }
+async function createSummariesInBatches(rows, db) {
+  if (rows.length === 0) {
+    return;
+  }
 
-//   const batchSize = 500;
-//   for (let index = 0; index < rows.length; index += batchSize) {
-//     await db.attendanceSummary.createMany({
-//       data: rows.slice(index, index + batchSize),
-//     });
-//   }
-// }
+  const batchSize = 500;
+  for (let index = 0; index < rows.length; index += batchSize) {
+    await db.attendanceSummary.createMany({
+      data: rows.slice(index, index + batchSize),
+    });
+  }
+}
 
 function buildSummaryRows({
   punches,

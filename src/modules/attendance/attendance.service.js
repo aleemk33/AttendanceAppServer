@@ -153,7 +153,9 @@ function serializeAttendanceProfileLocation(profile) {
 function summaryStatusToAttendanceState(status, isCurrentDay = false) {
   switch (status) {
     case AttendanceSummaryStatus.WORKING:
-      return "working";
+      // Once the day closes, an unfinished punch should read like the old
+      // half-day behavior rather than remaining "working" forever.
+      return isCurrentDay ? "working" : "halfDay";
     case AttendanceSummaryStatus.PRESENT:
       return "present";
     case AttendanceSummaryStatus.HALF_DAY:
