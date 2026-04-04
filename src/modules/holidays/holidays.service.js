@@ -2,6 +2,7 @@ import { HolidayChangeType } from '@prisma/client';
 import { getPrisma } from '../../config/database.js';
 import { BadRequestError, ConflictError, NotFoundError, } from '../../common/errors.js';
 import { businessToday } from '../../common/index.js';
+import { rebuildSummariesForDateRange } from '../attendance/attendance-summary.service.js';
 // Normalized snapshot stored in change logs for audit/history visibility.
 function holidaySnapshot(h) {
     return {
@@ -27,6 +28,13 @@ async function checkOverlap(startDate, endDate, excludeId) {
         throw new ConflictError(`Overlaps with existing holiday: ${overlap.title}`);
     }
 }
+function mergeDateRangeBounds(startA, endA, startB, endB) {
+    const dates = [startA, endA, startB, endB].map((value) => typeof value === 'string' ? value : value.toISOString().slice(0, 10));
+    return {
+        startDate: dates.reduce((min, value) => value < min ? value : min),
+        endDate: dates.reduce((max, value) => value > max ? value : max),
+    };
+}
 /**
  * Creates a holiday and writes an audit log snapshot.
  * Overlap with existing active holidays is blocked.
@@ -37,27 +45,30 @@ export async function createHoliday(callerId, data) {
         throw new BadRequestError('startDate must be <= endDate');
     }
     await checkOverlap(data.startDate, data.endDate);
-    const holiday = await prisma.holiday.create({
-        data: {
-            title: data.title,
-            description: data.description || null,
-            startDate: new Date(data.startDate),
-            endDate: new Date(data.endDate),
-            createdByUserId: callerId,
-        },
+    return prisma.$transaction(async (tx) => {
+        const holiday = await tx.holiday.create({
+            data: {
+                title: data.title,
+                description: data.description || null,
+                startDate: new Date(data.startDate),
+                endDate: new Date(data.endDate),
+                createdByUserId: callerId,
+            },
+        });
+        // Immutable audit trail for timeline/history APIs.
+        // Audit entry stores "after" state for deterministic history rendering.
+        await tx.holidayChangeLog.create({
+            data: {
+                holidayId: holiday.id,
+                changeType: HolidayChangeType.CREATED,
+                reason: 'Initial creation',
+                changedByUserId: callerId,
+                snapshotAfter: holidaySnapshot(holiday),
+            },
+        });
+        await rebuildSummariesForDateRange(data.startDate, data.endDate, tx);
+        return holiday;
     });
-    // Immutable audit trail for timeline/history APIs.
-    // Audit entry stores "after" state for deterministic history rendering.
-    await prisma.holidayChangeLog.create({
-        data: {
-            holidayId: holiday.id,
-            changeType: HolidayChangeType.CREATED,
-            reason: 'Initial creation',
-            changedByUserId: callerId,
-            snapshotAfter: holidaySnapshot(holiday),
-        },
-    });
-    return holiday;
 }
 /**
  * Updates future holidays only.
@@ -84,27 +95,31 @@ export async function updateHoliday(callerId, holidayId, data) {
     await checkOverlap(newStart, newEnd, holidayId);
     // Capture pre-change snapshot for audit diff views.
     const before = holidaySnapshot(holiday);
-    const updated = await prisma.holiday.update({
-        where: { id: holidayId },
-        data: {
-            ...(data.title !== undefined && { title: data.title }),
-            ...(data.description !== undefined && { description: data.description }),
-            ...(data.startDate !== undefined && { startDate: new Date(data.startDate) }),
-            ...(data.endDate !== undefined && { endDate: new Date(data.endDate) }),
-            updatedByUserId: callerId,
-        },
+    return prisma.$transaction(async (tx) => {
+        const updated = await tx.holiday.update({
+            where: { id: holidayId },
+            data: {
+                ...(data.title !== undefined && { title: data.title }),
+                ...(data.description !== undefined && { description: data.description }),
+                ...(data.startDate !== undefined && { startDate: new Date(data.startDate) }),
+                ...(data.endDate !== undefined && { endDate: new Date(data.endDate) }),
+                updatedByUserId: callerId,
+            },
+        });
+        await tx.holidayChangeLog.create({
+            data: {
+                holidayId: holiday.id,
+                changeType: HolidayChangeType.UPDATED,
+                reason: data.reason,
+                changedByUserId: callerId,
+                snapshotBefore: before,
+                snapshotAfter: holidaySnapshot(updated),
+            },
+        });
+        const affectedRange = mergeDateRangeBounds(holiday.startDate, holiday.endDate, newStart, newEnd);
+        await rebuildSummariesForDateRange(affectedRange.startDate, affectedRange.endDate, tx);
+        return updated;
     });
-    await prisma.holidayChangeLog.create({
-        data: {
-            holidayId: holiday.id,
-            changeType: HolidayChangeType.UPDATED,
-            reason: data.reason,
-            changedByUserId: callerId,
-            snapshotBefore: before,
-            snapshotAfter: holidaySnapshot(updated),
-        },
-    });
-    return updated;
 }
 /**
  * Soft deletes a future holiday and records deletion reason.
@@ -120,20 +135,23 @@ export async function deleteHoliday(callerId, holidayId, reason) {
     }
     const before = holidaySnapshot(holiday);
     // Soft-delete preserves historic references and auditability.
-    await prisma.holiday.update({
-        where: { id: holidayId },
-        data: { isDeleted: true, updatedByUserId: callerId },
+    return prisma.$transaction(async (tx) => {
+        await tx.holiday.update({
+            where: { id: holidayId },
+            data: { isDeleted: true, updatedByUserId: callerId },
+        });
+        await tx.holidayChangeLog.create({
+            data: {
+                holidayId: holiday.id,
+                changeType: HolidayChangeType.DELETED,
+                reason,
+                changedByUserId: callerId,
+                snapshotBefore: before,
+            },
+        });
+        await rebuildSummariesForDateRange(holiday.startDate, holiday.endDate, tx);
+        return { deleted: true };
     });
-    await prisma.holidayChangeLog.create({
-        data: {
-            holidayId: holiday.id,
-            changeType: HolidayChangeType.DELETED,
-            reason,
-            changedByUserId: callerId,
-            snapshotBefore: before,
-        },
-    });
-    return { deleted: true };
 }
 /**
  * Lists holidays in a date window.

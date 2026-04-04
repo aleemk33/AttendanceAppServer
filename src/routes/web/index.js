@@ -21,22 +21,27 @@ import {
   attendanceController,
   regularizationSchema,
   webAttendanceRecordsQuerySchema,
+  webAttendanceOverviewQuerySchema,
+  attendanceOverviewQuerySchema,
 } from "../../modules/attendance/index.js";
 import {
   leavesController,
   leaveActionSchema,
   leaveRejectSchema,
+  listLeaveRequestsQuerySchema,
 } from "../../modules/leaves/index.js";
 import {
   deviceChangesController,
   deviceChangeActionSchema,
   deviceChangeRejectSchema,
+  listDeviceChangeQuerySchema,
 } from "../../modules/device-changes/index.js";
 import {
   holidaysController,
   createHolidaySchema,
   updateHolidaySchema,
   deleteHolidaySchema,
+  listHolidaysQuerySchema,
 } from "../../modules/holidays/index.js";
 import { dashboardController } from "../../modules/dashboard/index.js";
 import { Portal, Role } from "@prisma/client";
@@ -107,6 +112,7 @@ router.put(
 router.get(
   "/attendance/overview",
   requireRoles(Role.MANAGER, Role.ADMIN),
+  validate(webAttendanceOverviewQuerySchema, "query"),
   attendanceController.webAttendanceOverview,
 );
 router.get(
@@ -118,6 +124,7 @@ router.get(
 router.get(
   "/users/:userId/attendance/overview",
   requireRoles(Role.MANAGER, Role.ADMIN),
+  validate(attendanceOverviewQuerySchema, "query"),
   attendanceController.webUserAttendanceOverview,
 );
 // Regularizations
@@ -136,6 +143,7 @@ router.delete(
 router.get(
   "/leave-requests",
   requireRoles(Role.MANAGER, Role.ADMIN),
+  validate(listLeaveRequestsQuerySchema, "query"),
   leavesController.listLeaveRequestsWeb,
 );
 router.get(
@@ -159,6 +167,7 @@ router.patch(
 router.get(
   "/device-change-requests",
   requireRoles(Role.MANAGER, Role.ADMIN),
+  validate(listDeviceChangeQuerySchema, "query"),
   deviceChangesController.listDeviceChangeRequestsWeb,
 );
 router.patch(
@@ -177,6 +186,7 @@ router.patch(
 router.get(
   "/holidays",
   requireRoles(Role.MANAGER, Role.ADMIN),
+  validate(listHolidaysQuerySchema, "query"),
   holidaysController.listHolidays,
 );
 router.get(
@@ -208,4 +218,3 @@ router.delete(
   holidaysController.deleteHoliday,
 );
 export default router;
-//# sourceMappingURL=index.js.map

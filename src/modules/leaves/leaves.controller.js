@@ -6,6 +6,7 @@ export async function createLeaveRequest(req, res) {
     sendCreated(res, result, 'Leave request created');
 }
 export async function getMyLeaveRequests(req, res) {
+    // Manual parsing remains here since mobile endpoint doesn't have validation wired
     const filters = {
         status: req.query.status,
         page: Number(req.query.page) || 1,
@@ -23,15 +24,8 @@ export async function cancelLeaveRequest(req, res) {
     sendSuccess(res, result, undefined, 'Leave request cancelled');
 }
 export async function listLeaveRequestsWeb(req, res) {
-    const filters = {
-        status: req.query.status,
-        startDate: req.query.startDate,
-        endDate: req.query.endDate,
-        search: req.query.search,
-        page: Number(req.query.page) || 1,
-        limit: Number(req.query.limit) || 20,
-    };
-    const result = await leavesService.listLeaveRequestsWeb(req.user.roles, req.user.sub, filters);
+    // Query is validated by middleware (page/limit are already numbers)
+    const result = await leavesService.listLeaveRequestsWeb(req.user.roles, req.user.sub, req.query);
     sendSuccess(res, result.items, result.meta);
 }
 export async function getLeaveRequestWeb(req, res) {
@@ -46,4 +40,3 @@ export async function rejectLeaveRequest(req, res) {
     const result = await leavesService.rejectLeaveRequest(req.user.roles, req.user.sub, req.params.leaveRequestId, req.body.actionNote);
     sendSuccess(res, result, undefined, 'Leave request rejected');
 }
-//# sourceMappingURL=leaves.controller.js.map

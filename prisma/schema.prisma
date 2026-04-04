@@ -44,6 +44,20 @@ enum HolidayChangeType {
   DELETED
 }
 
+enum AttendanceSummaryStatus {
+  WORKING
+  PRESENT
+  HALF_DAY
+  ABSENT
+  ON_LEAVE
+}
+
+enum AttendanceSummarySource {
+  PUNCH
+  LEAVE
+  REGULARIZATION
+}
+
 model User {
   id            String   @id @default(uuid()) @db.Uuid
   fullName      String   @map("full_name") @db.VarChar(120)
@@ -70,6 +84,7 @@ model User {
   holidaysCreated            Holiday[]                  @relation("HolidayCreatedBy")
   holidaysUpdated            Holiday[]                  @relation("HolidayUpdatedBy")
   holidayChangeLogs          HolidayChangeLog[]
+  attendanceSummaries        AttendanceSummary[]
 
   @@map("users")
 }
@@ -137,6 +152,7 @@ model AttendanceRegularization {
 
   user     User @relation("UserRegularization", fields: [userId], references: [id])
   actionBy User @relation("RegularizationAction", fields: [actionByUserId], references: [id])
+  attendanceSummary AttendanceSummary?
 
   @@unique([userId, attendanceDate])
   @@map("attendance_regularizations")
@@ -158,6 +174,7 @@ model LeaveRequest {
 
   user     User  @relation("UserLeaveRequest", fields: [userId], references: [id])
   actionBy User? @relation("LeaveAction", fields: [actionByUserId], references: [id])
+  attendanceSummaries AttendanceSummary[]
 
   @@index([userId, status])
   @@index([startDate, endDate])
@@ -219,4 +236,29 @@ model HolidayChangeLog {
 
   @@index([holidayId])
   @@map("holiday_change_logs")
+}
+
+model AttendanceSummary {
+  id                String                  @id @default(uuid()) @db.Uuid
+  userId            String                  @map("user_id") @db.Uuid
+  attendanceDate    DateTime                @map("attendance_date") @db.Date
+  status            AttendanceSummaryStatus
+  source            AttendanceSummarySource
+  punchInAt         DateTime?               @map("punch_in_at") @db.Timestamptz()
+  punchOutAt        DateTime?               @map("punch_out_at") @db.Timestamptz()
+  workedMinutes     Int?                    @map("worked_minutes")
+  leaveRequestId    String?                 @map("leave_request_id") @db.Uuid
+  regularizationId  String?                 @unique @map("regularization_id") @db.Uuid
+  createdAt         DateTime                @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt         DateTime                @updatedAt @map("updated_at") @db.Timestamptz()
+
+  user           User                      @relation(fields: [userId], references: [id])
+  leaveRequest   LeaveRequest?             @relation(fields: [leaveRequestId], references: [id])
+  regularization AttendanceRegularization? @relation(fields: [regularizationId], references: [id])
+
+  @@unique([userId, attendanceDate])
+  @@index([attendanceDate])
+  @@index([userId, status])
+  @@index([status, attendanceDate])
+  @@map("attendance_summaries")
 }

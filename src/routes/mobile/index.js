@@ -3,7 +3,7 @@ import { authenticate, requirePortal, requireRoles } from '../../middlewares/ind
 import { validate } from '../../middlewares/validate.js';
 import { authController, googleLoginMobileSchema, refreshTokenSchema, deviceChangeRequestSchema } from '../../modules/auth/index.js';
 import { usersController } from '../../modules/users/index.js';
-import { attendanceController, punchInSchema } from '../../modules/attendance/index.js';
+import { attendanceController, punchInSchema, attendanceOverviewQuerySchema } from '../../modules/attendance/index.js';
 import { leavesController, createLeaveRequestSchema } from '../../modules/leaves/index.js';
 import { deviceChangesController, createDeviceChangeSchema } from '../../modules/device-changes/index.js';
 import { dashboardController } from '../../modules/dashboard/index.js';
@@ -21,7 +21,7 @@ router.get('/me/profile', usersController.getMyProfile);
 // Dashboard
 router.get('/me/dashboard', dashboardController.mobileDashboard);
 // Attendance
-router.get('/me/attendance/overview', attendanceController.myAttendanceOverview);
+router.get('/me/attendance/overview', validate(attendanceOverviewQuerySchema, 'query'), attendanceController.myAttendanceOverview);
 router.post('/me/attendance/punch-in', validate(punchInSchema), attendanceController.punchIn);
 router.post('/me/attendance/punch-out', attendanceController.punchOut);
 // Leave requests
@@ -33,4 +33,3 @@ router.patch('/me/leave-requests/:leaveRequestId/cancel', leavesController.cance
 router.get('/me/device-change-requests', deviceChangesController.getMyDeviceChangeRequests);
 router.post('/me/device-change-requests', validate(createDeviceChangeSchema), deviceChangesController.createDeviceChangeRequest);
 export default router;
-//# sourceMappingURL=index.js.map

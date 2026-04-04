@@ -2,10 +2,9 @@ import {
   Role,
   LeaveStatus,
   DeviceChangeStatus,
-  OverrideStatus,
+  AttendanceSummaryStatus,
 } from "@prisma/client";
 import { getPrisma } from "../../config/database.js";
-import { env } from "../../config/env.js";
 import {
   businessToday,
   businessYesterday,
@@ -48,32 +47,32 @@ export async function getMobileDashboard(userId) {
   const userCreatedDate = user?.createdAt
     ? user.createdAt.toISOString().slice(0, 10)
     : null;
-  // Today's live status takes precedence order: punch -> weekly off -> holiday -> leave.
-  const todayPunch = await prisma.attendancePunch.findUnique({
-    where: {
-      userId_attendanceDate: { userId, attendanceDate: new Date(today) },
-    },
+  // Today's live status - check today's summary row first
+  const todaySummary = await prisma.attendanceSummary.findUnique({
+    where: { userId_attendanceDate: { userId, attendanceDate: new Date(today) } },
   });
   // Status precedence is applied sequentially; later checks overwrite earlier status.
   let todayStatus = { date: today, status: "notPunchedIn" };
-  if (todayPunch) {
-    if (todayPunch.punchInAt && !todayPunch.punchOutAt) {
+  if (todaySummary) {
+    if (todaySummary.status === AttendanceSummaryStatus.WORKING) {
       todayStatus = {
         date: today,
         status: "working",
-        punchInAt: todayPunch.punchInAt.toISOString(),
+        punchInAt: todaySummary.punchInAt?.toISOString(),
       };
-    } else if (todayPunch.punchInAt && todayPunch.punchOutAt) {
+    } else if (todaySummary.punchInAt && todaySummary.punchOutAt) {
       todayStatus = {
         date: today,
         status: "completed",
-        punchInAt: todayPunch.punchInAt.toISOString(),
-        punchOutAt: todayPunch.punchOutAt.toISOString(),
-        workedMinutes: todayPunch.workedMinutes,
+        punchInAt: todaySummary.punchInAt.toISOString(),
+        punchOutAt: todaySummary.punchOutAt.toISOString(),
+        workedMinutes: todaySummary.workedMinutes,
       };
+    } else if (todaySummary.status === AttendanceSummaryStatus.ON_LEAVE) {
+      todayStatus = { date: today, status: "onLeave" };
     }
   }
-  // This sequence ensures calendar status can supersede raw punch state when applicable.
+  // Calendar status supersedes raw punch state when applicable.
   if (isWeeklyOff(today)) {
     todayStatus = { date: today, status: "weeklyOff" };
   }
@@ -92,65 +91,37 @@ export async function getMobileDashboard(userId) {
       holiday: todayHoliday.title,
     };
   }
-  // Check if today is on approved leave
-  const todayLeave = await prisma.leaveRequest.findFirst({
-    where: {
-      userId,
-      status: LeaveStatus.APPROVED,
-      startDate: { lte: new Date(today) },
-      endDate: { gte: new Date(today) },
-    },
-  });
+  // Preserve the current server behavior: approved leave has the final precedence for today's status.
+  const todayLeave =
+    todaySummary?.status === AttendanceSummaryStatus.ON_LEAVE
+      ? true
+      : await prisma.leaveRequest.findFirst({
+      where: {
+        userId,
+        status: LeaveStatus.APPROVED,
+        startDate: { lte: new Date(today) },
+        endDate: { gte: new Date(today) },
+      },
+    });
   if (todayLeave) {
     todayStatus = { date: today, status: "onLeave" };
   }
   // Month summary is closed through yesterday so percentages don't oscillate during the day.
-  // Closed-day window avoids counting in-progress day in monthly metrics.
   const { appliedEndDate } = clampEndDate(today);
-  // Only consider dates from user's creation date onwards
   const summaryStartDate =
     userCreatedDate && userCreatedDate > monthStart
       ? userCreatedDate
       : monthStart;
   const summaryDates = dateRange(summaryStartDate, appliedEndDate);
-  const [punches, regularizations, leaves, holidays] = await Promise.all([
-    prisma.attendancePunch.findMany({
+  // Fetch summary rows and holidays for the month
+  const [summaries, holidays] = await Promise.all([
+    prisma.attendanceSummary.findMany({
       where: {
         userId,
         attendanceDate: {
-          gte: new Date(monthStart),
+          gte: new Date(summaryStartDate),
           lte: new Date(appliedEndDate),
         },
-      },
-    }),
-    prisma.attendanceRegularization.findMany({
-      where: {
-        userId,
-        attendanceDate: {
-          gte: new Date(monthStart),
-          lte: new Date(appliedEndDate),
-        },
-      },
-    }),
-    prisma.leaveRequest.findMany({
-      where: {
-        userId,
-        status: LeaveStatus.APPROVED,
-        /** a logic for selecting all leaves which has a date in current month even if start and end dates are outside the month */
-        OR: [
-          {
-            startDate: { lte: new Date(monthEnd) },
-            endDate: { gte: new Date(monthStart) },
-          },
-          {
-            startDate: { lte: new Date(monthStart) },
-            endDate: { gte: new Date(monthStart) },
-          },
-          {
-            startDate: { lte: new Date(monthEnd) },
-            endDate: { gte: new Date(monthEnd) },
-          },
-        ],
       },
     }),
     prisma.holiday.findMany({
@@ -161,14 +132,8 @@ export async function getMobileDashboard(userId) {
       },
     }),
   ]);
-  const punchMap = new Map(
-    punches.map((p) => [p.attendanceDate.toISOString().slice(0, 10), p]),
-  );
-  const regMap = new Map(
-    regularizations.map((r) => [
-      r.attendanceDate.toISOString().slice(0, 10),
-      r,
-    ]),
+  const summaryMap = new Map(
+    summaries.map((s) => [s.attendanceDate.toISOString().slice(0, 10), s]),
   );
   // Expand holiday ranges into date-level lookup.
   const holidayDateSet = new Set();
@@ -179,19 +144,6 @@ export async function getMobileDashboard(userId) {
     );
     for (const d of hDates) holidayDateSet.add(d);
   }
-  // Expand approved leave ranges, excluding non-working dates.
-  const leaveDateSet = new Set();
-  for (const l of leaves) {
-    const lDates = dateRange(
-      l.startDate.toISOString().slice(0, 10),
-      l.endDate.toISOString().slice(0, 10),
-    );
-    for (const d of lDates) {
-      if (d > monthEnd || d < monthStart) continue; // Skip leave dates beyond current month end
-      if (!isWeeklyOff(d) && !holidayDateSet.has(d)) leaveDateSet.add(d);
-    }
-  }
-  const { FULL_DAY_MINUTES } = env();
   let presentDays = 0,
     halfDays = 0,
     absentDays = 0,
@@ -208,52 +160,35 @@ export async function getMobileDashboard(userId) {
       holidayDays++;
       continue;
     }
-    if (leaveDateSet.has(date)) {
-      leaveDays++;
-      continue;
-    }
-    const reg = regMap.get(date);
-    if (reg) {
-      if (reg.overrideStatus === OverrideStatus.PRESENT) {
-        presentDays++;
-        totalWorkMinutes += reg.overrideWorkedMinutes || 0;
-      } else if (reg.overrideStatus === OverrideStatus.HALF_DAY) {
-        halfDays++;
-        totalWorkMinutes += reg.overrideWorkedMinutes || 0;
-      } else {
-        absentDays++;
+    const summary = summaryMap.get(date);
+    if (summary) {
+      totalWorkMinutes += summary.workedMinutes ?? 0;
+      switch (summary.status) {
+        case AttendanceSummaryStatus.PRESENT:
+          presentDays++;
+          break;
+        case AttendanceSummaryStatus.HALF_DAY:
+        case AttendanceSummaryStatus.WORKING:
+          halfDays++;
+          break;
+        case AttendanceSummaryStatus.ABSENT:
+          absentDays++;
+          break;
+        case AttendanceSummaryStatus.ON_LEAVE:
+          leaveDays++;
+          break;
       }
-      continue;
-    }
-    const punch = punchMap.get(date);
-    if (punch && punch.punchInAt && punch.punchOutAt) {
-      if (
-        punch.workedMinutes != null &&
-        punch.workedMinutes >= FULL_DAY_MINUTES
-      ) {
-        presentDays++;
-        totalWorkMinutes += punch.workedMinutes || 0;
-      } else {
-        halfDays++;
-        totalWorkMinutes += punch.workedMinutes || 0;
-      }
-    } else if (punch && (punch.punchInAt || punch.punchOutAt)) {
-      halfDays++;
-      totalWorkMinutes += 4.5 * 60; // Assume half-day for single punch; can be adjusted based on business rules.
     } else {
       absentDays++;
     }
   }
-  // Attendance percentage considers present + half-day weighting only.
-  // const denominator = presentDays + halfDays + absentDays;
   const expectedWorkMinutes = (presentDays + halfDays + absentDays) * 9 * 60;
   const attendancePercentage =
     expectedWorkMinutes > 0
       ? Math.round((totalWorkMinutes / expectedWorkMinutes) * 10000) / 100
       : 0;
-  presentDays = presentDays + halfDays;
   const monthSummary = {
-    presentDays,
+    presentDays: presentDays + halfDays,
     absentDays,
     leaveDays,
     holidayDays,
@@ -261,35 +196,34 @@ export async function getMobileDashboard(userId) {
     attendancePercentage,
   };
   // Last 7 closed working days (for quick trend card on mobile home).
-  // Cursor walks backwards day-by-day; only working/non-holiday days are collected.
   const last7 = [];
   let cursor = yesterday;
   let count = 0;
-  // Stop at user's creation date or 2020-01-01
   const earliestDate =
     userCreatedDate && userCreatedDate > "2020-01-01"
       ? userCreatedDate
       : "2020-01-01";
   while (count < 7 && cursor >= earliestDate) {
     if (!isWeeklyOff(cursor) && !holidayDateSet.has(cursor)) {
-      const p = punchMap.get(cursor);
-      const r = regMap.get(cursor);
+      const summary = summaryMap.get(cursor);
       let status = "absent";
       let wm = null;
-      if (leaveDateSet.has(cursor)) {
-        status = "onLeave";
-      } else if (r) {
-        status = r.overrideStatus.toLowerCase();
-        wm = r.overrideWorkedMinutes;
-      } else if (p && p.punchInAt && p.punchOutAt) {
-        status =
-          p.workedMinutes != null && p.workedMinutes >= FULL_DAY_MINUTES
-            ? "present"
-            : "halfDay";
-        wm = p.workedMinutes;
-      } else if (p) {
-        status = "halfDay";
-        wm = p.workedMinutes;
+      if (summary) {
+        wm = summary.workedMinutes;
+        switch (summary.status) {
+          case AttendanceSummaryStatus.PRESENT:
+            status = "present";
+            break;
+          case AttendanceSummaryStatus.HALF_DAY:
+            status = "halfDay";
+            break;
+          case AttendanceSummaryStatus.ABSENT:
+            status = "absent";
+            break;
+          case AttendanceSummaryStatus.ON_LEAVE:
+            status = "onLeave";
+            break;
+        }
       }
       last7.push({ date: cursor, status, workedMinutes: wm });
       count++;
@@ -354,7 +288,6 @@ export async function getWebDashboard(
   };
   const headcount = await prisma.user.count({ where: attendanceUserWhere });
   // Pending leave count
-  // Pending queues are separately counted for high-signal dashboard cards.
   const pendingLeaveWhere = { status: LeaveStatus.PENDING };
   if (userWhere.managerUserId) {
     pendingLeaveWhere.user = { managerUserId: userWhere.managerUserId };
@@ -377,14 +310,12 @@ export async function getWebDashboard(
     take: 5,
     select: { id: true, title: true, startDate: true, endDate: true },
   });
-  // Aggregate attendance summary through appliedEndDate (usually yesterday).
+  // Aggregate attendance summary through appliedEndDate using summary table.
   const users = await prisma.user.findMany({
     where: attendanceUserWhere,
     select: { id: true, createdAt: true },
   });
-  // If team size is zero, downstream aggregations naturally resolve to zero values.
   const userIds = users.map((u) => u.id);
-  // Build a map of userId -> createdAt for filtering dates per user
   const userCreatedDateMap = new Map(
     users.map((u) => [
       u.id,
@@ -392,31 +323,14 @@ export async function getWebDashboard(
     ]),
   );
   const dates = dateRange(effectiveStart, appliedEndDate);
-  const [punches, regularizations, leaves, holidays] = await Promise.all([
-    prisma.attendancePunch.findMany({
+  const [summaries, holidays] = await Promise.all([
+    prisma.attendanceSummary.findMany({
       where: {
         userId: { in: userIds },
         attendanceDate: {
           gte: new Date(effectiveStart),
           lte: new Date(appliedEndDate),
         },
-      },
-    }),
-    prisma.attendanceRegularization.findMany({
-      where: {
-        userId: { in: userIds },
-        attendanceDate: {
-          gte: new Date(effectiveStart),
-          lte: new Date(appliedEndDate),
-        },
-      },
-    }),
-    prisma.leaveRequest.findMany({
-      where: {
-        userId: { in: userIds },
-        status: LeaveStatus.APPROVED,
-        startDate: { lte: new Date(appliedEndDate) },
-        endDate: { gte: new Date(effectiveStart) },
       },
     }),
     prisma.holiday.findMany({
@@ -427,7 +341,7 @@ export async function getWebDashboard(
       },
     }),
   ]);
-  // Shared holiday lookup for all users in selected date range.
+  // Expand holidays into date set
   const holidayDateSet = new Set();
   for (const h of holidays) {
     const hd = dateRange(
@@ -436,41 +350,25 @@ export async function getWebDashboard(
     );
     for (const d of hd) holidayDateSet.add(d);
   }
-  const { FULL_DAY_MINUTES } = env();
+  // Build summary lookup by userId -> date -> summary
+  const summariesByUserId = new Map();
+  for (const s of summaries) {
+    if (!summariesByUserId.has(s.userId)) {
+      summariesByUserId.set(s.userId, new Map());
+    }
+    summariesByUserId.get(s.userId).set(s.attendanceDate.toISOString().slice(0, 10), s);
+  }
   let totalPresent = 0,
     totalHalf = 0,
     totalAbsent = 0,
     totalLeave = 0,
     totalHoliday = 0,
     totalWeeklyOff = 0;
-  // Aggregate per-user day states into organization/team totals.
   for (const uid of userIds) {
     const userCreatedDate = userCreatedDateMap.get(uid);
-    const uPunches = new Map(
-      punches
-        .filter((p) => p.userId === uid)
-        .map((p) => [p.attendanceDate.toISOString().slice(0, 10), p]),
-    );
-    const uRegs = new Map(
-      regularizations
-        .filter((r) => r.userId === uid)
-        .map((r) => [r.attendanceDate.toISOString().slice(0, 10), r]),
-    );
-    const uLeaves = leaves.filter((l) => l.userId === uid);
-    const uLeaveDates = new Set();
-    for (const l of uLeaves) {
-      const ld = dateRange(
-        l.startDate.toISOString().slice(0, 10),
-        l.endDate.toISOString().slice(0, 10),
-      );
-      for (const d of ld)
-        if (!isWeeklyOff(d) && !holidayDateSet.has(d)) uLeaveDates.add(d);
-    }
+    const userSummaries = summariesByUserId.get(uid) || new Map();
     for (const date of dates) {
-      // Skip dates before user was created
-      if (userCreatedDate && date < userCreatedDate) {
-        continue;
-      }
+      if (userCreatedDate && date < userCreatedDate) continue;
       if (isWeeklyOff(date)) {
         totalWeeklyOff++;
         continue;
@@ -479,27 +377,23 @@ export async function getWebDashboard(
         totalHoliday++;
         continue;
       }
-      if (uLeaveDates.has(date)) {
-        totalLeave++;
-        continue;
-      }
-      const reg = uRegs.get(date);
-      if (reg) {
-        if (reg.overrideStatus === OverrideStatus.PRESENT) totalPresent++;
-        else if (reg.overrideStatus === OverrideStatus.HALF_DAY) totalHalf++;
-        else totalAbsent++;
-        continue;
-      }
-      const punch = uPunches.get(date);
-      if (punch && punch.punchInAt && punch.punchOutAt) {
-        if (
-          punch.workedMinutes != null &&
-          punch.workedMinutes >= FULL_DAY_MINUTES
-        )
-          totalPresent++;
-        else totalHalf++;
-      } else if (punch) {
-        totalHalf++;
+      const summary = userSummaries.get(date);
+      if (summary) {
+        switch (summary.status) {
+          case AttendanceSummaryStatus.PRESENT:
+            totalPresent++;
+            break;
+          case AttendanceSummaryStatus.HALF_DAY:
+          case AttendanceSummaryStatus.WORKING:
+            totalHalf++;
+            break;
+          case AttendanceSummaryStatus.ABSENT:
+            totalAbsent++;
+            break;
+          case AttendanceSummaryStatus.ON_LEAVE:
+            totalLeave++;
+            break;
+        }
       } else {
         totalAbsent++;
       }

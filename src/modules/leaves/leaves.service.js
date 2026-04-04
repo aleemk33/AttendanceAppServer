@@ -13,6 +13,9 @@ import {
   isWeeklyOff,
 } from "../../common/index.js";
 import { paginate, paginationMeta } from "../../common/pagination.js";
+import {
+  upsertSummaryFromApprovedLeave,
+} from "../attendance/attendance-summary.service.js";
 // Expands holidays in range into a date set for fast leave-day calculations.
 async function getHolidayDatesInRange(startDate, endDate) {
   const prisma = getPrisma();
@@ -233,6 +236,7 @@ export async function listLeaveRequestsWeb(callerRoles, callerId, filters) {
 /**
  * Approves one pending leave request.
  * Self-approval is blocked; manager scope is enforced.
+ * Keeps current behavior where approved leave takes precedence in attendance views.
  */
 export async function approveLeaveRequest(
   callerRoles,
@@ -259,18 +263,23 @@ export async function approveLeaveRequest(
       throw new ForbiddenError("You can only approve direct reports' leave");
     }
   }
-  return prisma.leaveRequest.update({
-    where: { id: leaveRequestId },
-    data: {
-      status: LeaveStatus.APPROVED,
-      actionByUserId: callerId,
-      actionAt: new Date(),
-      actionNote: actionNote || null,
-    },
-    include: {
-      user: { select: { id: true, fullName: true } },
-      actionBy: { select: { id: true, fullName: true } },
-    },
+  return prisma.$transaction(async (tx) => {
+    const approved = await tx.leaveRequest.update({
+      where: { id: leaveRequestId },
+      data: {
+        status: LeaveStatus.APPROVED,
+        actionByUserId: callerId,
+        actionAt: new Date(),
+        actionNote: actionNote || null,
+      },
+      include: {
+        user: { select: { id: true, fullName: true } },
+        actionBy: { select: { id: true, fullName: true } },
+      },
+    });
+
+    await upsertSummaryFromApprovedLeave(approved, tx);
+    return approved;
   });
 }
 /**

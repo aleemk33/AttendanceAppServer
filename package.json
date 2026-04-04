@@ -9,8 +9,10 @@
   },
   "scripts": {
     "dev": "node --watch --env-file=.env src/server.js",
-    "build": "npm install && prisma generate && prisma migrate deploy && node scripts/init-admin.js",
-    "start": "node src/server.js"
+    "build": "npm install && prisma generate && prisma migrate deploy && node scripts/backfill-attendance-summaries.js && node scripts/init-admin.js",
+    "start": "node src/server.js",
+    "sync:summaries": "node scripts/backfill-attendance-summaries.js",
+    "check:summaries": "node scripts/check-attendance-summaries.js"
   },
   "dependencies": {
     "@prisma/client": "^6.4.0",

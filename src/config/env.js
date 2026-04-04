@@ -1,21 +1,38 @@
-import { z } from 'zod';
+import { z } from "zod";
 // Central schema for all process environment variables.
 const envSchema = z.object({
-    PORT: z.coerce.number().default(3000),
-    NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-    DATABASE_URL: z.string().min(1).default('postgresql://attendance_user:attendance_pass@localhost:5432/attendance_db'),
-    JWT_ACCESS_SECRET: z.string().min(8).default('supersecretkeyforaccess'),
-    JWT_REFRESH_SECRET: z.string().min(8).default('supersecretkeyforrefresh'),
-    JWT_ACCESS_TTL: z.string().default('15m'),
-    JWT_REFRESH_TTL: z.string().default('7d'),
-    BUSINESS_TIMEZONE: z.string().default('Asia/Kolkata'),
-    COMPANY_DOMAIN: z.string().min(1).default('b2winfotech.ai'),
-    GOOGLE_WEB_CLIENT_ID: z.string().min(1).default('514104295700-9nnc6c94c26e3j80o9b4ptm9t7n9i6en.apps.googleusercontent.com'),
-    GOOGLE_ANDROID_CLIENT_ID: z.string().min(1).default('514104295700-tbsct3qphntps1h28grinkpv2rd6tkfh.apps.googleusercontent.com'),
-    FULL_DAY_MINUTES: z.coerce.number().default(540),
-    HALF_DAY_MINUTES: z.coerce.number().default(270),
-    CORS_WEB_ORIGIN: z.string().default('http://localhost:3001'),
-    LOG_LEVEL: z.string().default('info'),
+  PORT: z.coerce.number().default(3000),
+  NODE_ENV: z
+    .enum(["development", "production", "test"])
+    .default("development"),
+  DATABASE_URL: z
+    .string()
+    .min(1)
+    .default(
+      "postgresql://attendance_user:attendance_pass@localhost:5432/attendance_db",
+    ),
+  JWT_ACCESS_SECRET: z.string().min(8).default("supersecretkeyforaccess"),
+  JWT_REFRESH_SECRET: z.string().min(8).default("supersecretkeyforrefresh"),
+  JWT_ACCESS_TTL: z.string().default("15m"),
+  JWT_REFRESH_TTL: z.string().default("7d"),
+  BUSINESS_TIMEZONE: z.string().default("Asia/Kolkata"),
+  COMPANY_DOMAIN: z.string().min(1).default("b2winfotech.ai"),
+  GOOGLE_WEB_CLIENT_ID: z
+    .string()
+    .min(1)
+    .default(
+      "514104295700-9nnc6c94c26e3j80o9b4ptm9t7n9i6en.apps.googleusercontent.com",
+    ),
+  GOOGLE_ANDROID_CLIENT_ID: z
+    .string()
+    .min(1)
+    .default(
+      "514104295700-tbsct3qphntps1h28grinkpv2rd6tkfh.apps.googleusercontent.com",
+    ),
+  FULL_DAY_MINUTES: z.coerce.number().default(540),
+  HALF_DAY_MINUTES: z.coerce.number().default(270),
+  CORS_WEB_ORIGIN: z.string().default("http://localhost:3001"),
+  LOG_LEVEL: z.string().default("info"),
 });
 // Cached singleton to avoid reparsing process.env repeatedly.
 let _env = null;
@@ -24,20 +41,21 @@ let _env = null;
  * Process exits on invalid config because serving traffic with bad config is unsafe.
  */
 export function loadEnv() {
-    if (_env)
-        return _env;
-    const result = envSchema.safeParse(process.env);
-    if (!result.success) {
-        console.error('Invalid environment variables:', result.error.flatten().fieldErrors);
-        process.exit(1);
-    }
-    _env = result.data;
-    return _env;
+  if (_env) return _env;
+  const result = envSchema.safeParse(process.env);
+  if (!result.success) {
+    console.error(
+      "Invalid environment variables:",
+      result.error.flatten().fieldErrors,
+    );
+    process.exit(1);
+  }
+  _env = result.data;
+  return _env;
 }
 export function env() {
-    // Lazy-load support for modules that call env() before server bootstrap.
-    if (!_env)
-        return loadEnv();
-    return _env;
+  // Lazy-load support for modules that call env() before server bootstrap.
+  if (!_env) return loadEnv();
+  return _env;
 }
 //# sourceMappingURL=env.js.map

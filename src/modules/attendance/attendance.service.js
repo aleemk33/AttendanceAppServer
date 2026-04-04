@@ -1,4 +1,10 @@
-import { Role, OverrideStatus, LeaveStatus } from "@prisma/client";
+import {
+  Role,
+  OverrideStatus,
+  LeaveStatus,
+  AttendanceSummaryStatus,
+  AttendanceSummarySource,
+} from "@prisma/client";
 import { getPrisma } from "../../config/database.js";
 import { env } from "../../config/env.js";
 import {
@@ -17,6 +23,11 @@ import {
   isPast,
   haversineMeters,
 } from "../../common/index.js";
+import {
+  upsertSummaryFromPunch,
+  upsertSummaryFromRegularization,
+  rebuildSummaryForDate,
+} from "./attendance-summary.service.js";
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 async function getHolidaysInRange(startDate, endDate) {
   const prisma = getPrisma();
@@ -135,6 +146,102 @@ function serializeAttendanceProfileLocation(profile) {
     latitude: Number(profile.officeLatitude),
     longitude: Number(profile.officeLongitude),
   };
+}
+/**
+ * Maps summary status enum to attendanceState string for API response.
+ */
+function summaryStatusToAttendanceState(status, isCurrentDay = false) {
+  switch (status) {
+    case AttendanceSummaryStatus.WORKING:
+      return "working";
+    case AttendanceSummaryStatus.PRESENT:
+      return "present";
+    case AttendanceSummaryStatus.HALF_DAY:
+      return "halfDay";
+    case AttendanceSummaryStatus.ABSENT:
+      return "absent";
+    case AttendanceSummaryStatus.ON_LEAVE:
+      return "onLeave";
+    default:
+      return "absent";
+  }
+}
+/**
+ * Builds attendance day object from summary row, holiday, and context.
+ * Uses summary table as primary source, with holiday/weekly off precedence.
+ */
+function buildAttendanceDayFromSummary(date, summary, holiday, options = {}) {
+  const flags = [];
+  let dayType = "workingDay";
+  let attendanceState;
+
+  // 1) weekly off / holiday always take precedence
+  if (isWeeklyOff(date)) {
+    dayType = "weeklyOff";
+    attendanceState = "weeklyOff";
+  } else if (holiday) {
+    dayType = "holiday";
+    attendanceState = "holiday";
+  }
+  // 2) summary row exists
+  else if (summary) {
+    attendanceState = summaryStatusToAttendanceState(
+      summary.status,
+      isToday(date),
+    );
+    if (summary.source === AttendanceSummarySource.REGULARIZATION) {
+      if (
+        summary.status === AttendanceSummaryStatus.HALF_DAY ||
+        summary.status === AttendanceSummaryStatus.ABSENT
+      ) {
+        flags.push("regularized");
+      }
+    }
+    if (
+      summary.source === AttendanceSummarySource.PUNCH &&
+      summary.punchInAt &&
+      !summary.punchOutAt &&
+      !isToday(date)
+    ) {
+      flags.push("missingPunchOut");
+    }
+  }
+  // 3) inferred absent for past working days with no summary
+  else if (isPast(date)) {
+    attendanceState = "absent";
+  }
+  // 4) today/future with no data
+  else {
+    attendanceState = "absent";
+  }
+
+  const day = {
+    date,
+    dayType,
+    attendanceState,
+    punchInAt: summary?.punchInAt?.toISOString() ?? null,
+    punchOutAt: summary?.punchOutAt?.toISOString() ?? null,
+    workedMinutes: summary?.workedMinutes ?? null,
+    flags,
+    holiday: holiday ? { id: holiday.id, title: holiday.title } : null,
+    leaveRequest: summary?.leaveRequestId
+      ? {
+          id: summary.leaveRequestId,
+          status: summary.leaveRequest?.status ?? "APPROVED",
+        }
+      : null,
+    regularization: summary?.regularizationId
+      ? {
+          id: summary.regularizationId,
+          overrideStatus: summary.regularization?.overrideStatus ?? null,
+          reason: summary.regularization?.reason ?? null,
+        }
+      : null,
+  };
+  if (options.includeLocation) {
+    day.location = options.location ?? null;
+  }
+  return day;
 }
 function buildAttendanceDay(
   date,
@@ -361,30 +468,33 @@ export async function punchIn(userId, latitude, longitude, deviceId) {
       `You are ${Math.round(distance)}m from office. Max allowed: ${profile.officeRadiusMeters}m`,
     );
   }
-  // Allow create-or-update semantics because record might exist without punchIn (rare/manual flows).
-  const existing = await prisma.attendancePunch.findUnique({
-    where: {
-      userId_attendanceDate: { userId, attendanceDate: new Date(today) },
-    },
-  });
-  if (existing?.punchInAt) {
-    throw new ConflictError("Already punched in for today");
-  }
-  const now = new Date();
-  if (existing) {
-    return prisma.attendancePunch.update({
-      where: { id: existing.id },
-      data: {
-        punchInAt: now,
+  return prisma.$transaction(async (tx) => {
+    // Allow create-or-update semantics because record might exist without punchIn (rare/manual flows).
+    const existing = await tx.attendancePunch.findUnique({
+      where: {
+        userId_attendanceDate: { userId, attendanceDate: new Date(today) },
       },
     });
-  }
-  return prisma.attendancePunch.create({
-    data: {
-      userId,
-      attendanceDate: new Date(today),
-      punchInAt: now,
-    },
+    if (existing?.punchInAt) {
+      throw new ConflictError("Already punched in for today");
+    }
+
+    const now = new Date();
+    const punch = existing
+      ? await tx.attendancePunch.update({
+          where: { id: existing.id },
+          data: { punchInAt: now },
+        })
+      : await tx.attendancePunch.create({
+          data: {
+            userId,
+            attendanceDate: new Date(today),
+            punchInAt: now,
+          },
+        });
+
+    await upsertSummaryFromPunch(userId, today, punch, tx);
+    return punch;
   });
 }
 /**
@@ -404,25 +514,31 @@ export async function punchOut(userId, deviceId) {
   if (profile.boundDeviceId !== deviceId) {
     throw new ForbiddenError("Device mismatch");
   }
-  const punch = await prisma.attendancePunch.findUnique({
-    where: {
-      userId_attendanceDate: { userId, attendanceDate: new Date(today) },
-    },
-  });
-  if (!punch || !punch.punchInAt) {
-    throw new BadRequestError("No punch-in record for today");
-  }
-  if (punch.punchOutAt) {
-    throw new ConflictError("Already punched out for today");
-  }
-  const now = new Date();
-  // Worked minutes are persisted once at punch-out; reporting reuses this value.
-  const workedMinutes = Math.floor(
-    (now.getTime() - punch.punchInAt.getTime()) / 60000,
-  );
-  return prisma.attendancePunch.update({
-    where: { id: punch.id },
-    data: { punchOutAt: now, workedMinutes },
+  return prisma.$transaction(async (tx) => {
+    const punch = await tx.attendancePunch.findUnique({
+      where: {
+        userId_attendanceDate: { userId, attendanceDate: new Date(today) },
+      },
+    });
+    if (!punch || !punch.punchInAt) {
+      throw new BadRequestError("No punch-in record for today");
+    }
+    if (punch.punchOutAt) {
+      throw new ConflictError("Already punched out for today");
+    }
+
+    const now = new Date();
+    // Worked minutes are persisted once at punch-out; reporting reuses this value.
+    const workedMinutes = Math.floor(
+      (now.getTime() - punch.punchInAt.getTime()) / 60000,
+    );
+    const updatedPunch = await tx.attendancePunch.update({
+      where: { id: punch.id },
+      data: { punchOutAt: now, workedMinutes },
+    });
+
+    await upsertSummaryFromPunch(userId, today, updatedPunch, tx);
+    return updatedPunch;
   });
 }
 // ─── Attendance Overview (for a single user) ─────────────────────────────────
@@ -457,20 +573,19 @@ export async function getUserAttendanceOverview(
     userCreatedDate && userCreatedDate > requestedStart
       ? userCreatedDate
       : requestedStart;
-  let effectiveEnd =
-    endDate == null ? clampEndDate(today) : clampEndDate(endDate);
-  const { appliedEndDate, currentDateExcluded } = clampEndDate(effectiveEnd);
+  // Fix: clampEndDate returns an object, not a string
+  const requestedEnd = endDate || today;
+  const { appliedEndDate, currentDateExcluded } = clampEndDate(requestedEnd);
   /**
    * We show "today" in detailed timeline for live UX,
    * but aggregate summary excludes current date to avoid volatile percentages.
    */
-  const displayEndDate = effectiveEnd >= today ? today : effectiveEnd;
+  const displayEndDate = requestedEnd >= today ? today : requestedEnd;
   const aggregateEndDate = appliedEndDate;
-  // Fetch data
+  // Fetch data using summary table + holidays
   const dates = dateRange(effectiveStart, displayEndDate);
-  // Data loaded in bulk once, then reduced into maps for fast per-day lookup.
-  const [punches, regularizations, leaves, holidays] = await Promise.all([
-    prisma.attendancePunch.findMany({
+  const [summaries, holidays] = await Promise.all([
+    prisma.attendanceSummary.findMany({
       where: {
         userId,
         attendanceDate: {
@@ -478,42 +593,25 @@ export async function getUserAttendanceOverview(
           lte: new Date(displayEndDate),
         },
       },
-    }),
-    prisma.attendanceRegularization.findMany({
-      where: {
-        userId,
-        attendanceDate: {
-          gte: new Date(effectiveStart),
-          lte: new Date(displayEndDate),
+      include: {
+        leaveRequest: { select: { id: true, status: true } },
+        regularization: {
+          select: { id: true, overrideStatus: true, reason: true },
         },
-      },
-    }),
-    prisma.leaveRequest.findMany({
-      where: {
-        userId,
-        status: { in: [LeaveStatus.APPROVED, LeaveStatus.PENDING] },
-        startDate: { lte: new Date(displayEndDate) },
-        endDate: { gte: new Date(effectiveStart) },
       },
     }),
     getHolidaysInRange(effectiveStart, displayEndDate),
   ]);
-  const punchMap = buildDateKeyedMap(punches);
-  const regMap = buildDateKeyedMap(regularizations);
+  const summaryMap = buildDateKeyedMap(summaries);
   const holidayMap = buildHolidayDateMap(holidays);
-  const leaveDateMap = buildApprovedLeaveDateMap(leaves, holidayMap);
-  const { FULL_DAY_MINUTES } = env();
   const days = dates.map((date) =>
-    buildAttendanceDay(
+    buildAttendanceDayFromSummary(
       date,
-      punchMap.get(date),
-      regMap.get(date),
+      summaryMap.get(date),
       holidayMap.get(date),
-      leaveDateMap.get(date),
-      FULL_DAY_MINUTES,
     ),
   );
-  // Summary through applied end date (normally yesterday if query reaches today/future).
+  // Summary through applied end date (normally yesterday if query reaches today/future)
   const summaryDays = days.filter((d) => d.date <= aggregateEndDate);
   const summary = computeSummary(summaryDays);
   const result = {
@@ -579,54 +677,26 @@ export async function getWebAttendanceOverview(callerRoles, callerId, filters) {
       skip: (filters.page - 1) * filters.limit,
       take: filters.limit,
     }),
+    buildAttendanceDayFromSummary,
   ]);
-  // If page is empty, these IN clauses naturally return zero rows.
-  const userIds = users.map((u) => u.id);
-  // Bulk-fetch once and derive per-user summaries in memory to reduce query count.
-  const [punches, regularizations, leaves, holidays] = await Promise.all([
-    prisma.attendancePunch.findMany({
+  const userIds = users.map((user) => user.id);
+  const [summaries, holidays] = await Promise.all([
+    prisma.attendanceSummary.findMany({
       where: {
         userId: { in: userIds },
         attendanceDate: {
           gte: new Date(effectiveStart),
           lte: new Date(appliedEndDate),
         },
-      },
-    }),
-    prisma.attendanceRegularization.findMany({
-      where: {
-        userId: { in: userIds },
-        attendanceDate: {
-          gte: new Date(effectiveStart),
-          lte: new Date(appliedEndDate),
-        },
-      },
-    }),
-    prisma.leaveRequest.findMany({
-      where: {
-        userId: { in: userIds },
-        status: LeaveStatus.APPROVED,
-        startDate: { lte: new Date(appliedEndDate) },
-        endDate: { gte: new Date(effectiveStart) },
       },
     }),
     getHolidaysInRange(effectiveStart, appliedEndDate),
   ]);
   const holidayMap = buildHolidayDateMap(holidays);
-  const punchesByUserId = buildDateKeyedMapsByUserId(punches);
-  const regularizationsByUserId = buildDateKeyedMapsByUserId(regularizations);
-  const leaveDatesByUserId = buildApprovedLeaveDateMapsByUserId(
-    leaves,
-    holidayMap,
-  );
   const dates = dateRange(effectiveStart, appliedEndDate);
-  // Build per-user summaries using same precedence used by single-user overview.
-  // User summaries are independent and computed in-memory from the same bulk datasets.
+  const summariesByUserId = buildDateKeyedMapsByUserId(summaries);
   const items = users.map((user) => {
-    const userPunches = punchesByUserId.get(user.id) || new Map();
-    const userRegs = regularizationsByUserId.get(user.id) || new Map();
-    const userLeaveDates = leaveDatesByUserId.get(user.id) || new Map();
-    // Only consider dates from user's creation date onwards
+    const userSummaries = summariesByUserId.get(user.id) || new Map();
     const userCreatedDate = user.createdAt
       ? user.createdAt.toISOString().slice(0, 10)
       : null;
@@ -637,12 +707,8 @@ export async function getWebAttendanceOverview(callerRoles, callerId, filters) {
       holidayDays = 0,
       weeklyOffDays = 0,
       totalWorkedMinutes = 0;
-    const { FULL_DAY_MINUTES } = env();
     for (const date of dates) {
-      // Skip dates before user was created
-      if (userCreatedDate && date < userCreatedDate) {
-        continue;
-      }
+      if (userCreatedDate && date < userCreatedDate) continue;
       if (isWeeklyOff(date)) {
         weeklyOffDays++;
         continue;
@@ -651,32 +717,23 @@ export async function getWebAttendanceOverview(callerRoles, callerId, filters) {
         holidayDays++;
         continue;
       }
-      if (userLeaveDates.has(date)) {
-        leaveDays++;
-        continue;
-      }
-      const reg = userRegs.get(date);
-      if (reg) {
-        totalWorkedMinutes += reg.overrideWorkedMinutes ?? 0;
-        if (reg.overrideStatus === OverrideStatus.PRESENT) presentDays++;
-        else if (reg.overrideStatus === OverrideStatus.HALF_DAY) halfDays++;
-        else absentDays++;
-        continue;
-      }
-      const punch = userPunches.get(date);
-      if (punch) {
-        if (punch.punchInAt && punch.punchOutAt) {
-          totalWorkedMinutes += punch.workedMinutes ?? 0;
-          if (
-            punch.workedMinutes != null &&
-            punch.workedMinutes >= FULL_DAY_MINUTES
-          )
+      const summary = userSummaries.get(date);
+      if (summary) {
+        totalWorkedMinutes += summary.workedMinutes ?? 0;
+        switch (summary.status) {
+          case AttendanceSummaryStatus.PRESENT:
             presentDays++;
-          else halfDays++;
-        } else {
-          // Incomplete punch record is treated as half day by policy.
-          totalWorkedMinutes += 4.5 * 60;
-          halfDays++;
+            break;
+          case AttendanceSummaryStatus.HALF_DAY:
+          case AttendanceSummaryStatus.WORKING:
+            halfDays++;
+            break;
+          case AttendanceSummaryStatus.ABSENT:
+            absentDays++;
+            break;
+          case AttendanceSummaryStatus.ON_LEAVE:
+            leaveDays++;
+            break;
         }
       } else {
         absentDays++;
@@ -701,26 +758,29 @@ export async function getWebAttendanceOverview(callerRoles, callerId, filters) {
       },
     };
   });
-  // Cross-user aggregate shown in web dashboard tables/cards.
   const aggregate = {
-    presentDays: items.reduce((s, i) => s + i.summary.presentDays, 0),
-    halfDays: items.reduce((s, i) => s + i.summary.halfDays, 0),
-    absentDays: items.reduce((s, i) => s + i.summary.absentDays, 0),
-    leaveDays: items.reduce((s, i) => s + i.summary.leaveDays, 0),
-    holidayDays: items.reduce((s, i) => s + i.summary.holidayDays, 0),
-    weeklyOffDays: items.reduce((s, i) => s + i.summary.weeklyOffDays, 0),
+    presentDays: items.reduce((sum, item) => sum + item.summary.presentDays, 0),
+    halfDays: items.reduce((sum, item) => sum + item.summary.halfDays, 0),
+    absentDays: items.reduce((sum, item) => sum + item.summary.absentDays, 0),
+    leaveDays: items.reduce((sum, item) => sum + item.summary.leaveDays, 0),
+    holidayDays: items.reduce((sum, item) => sum + item.summary.holidayDays, 0),
+    weeklyOffDays: items.reduce(
+      (sum, item) => sum + item.summary.weeklyOffDays,
+      0,
+    ),
     totalWorkedMinutes: items.reduce(
-      (s, i) => s + i.summary.totalWorkedMinutes,
+      (sum, item) => sum + item.summary.totalWorkedMinutes,
       0,
     ),
     attendancePercentage: 0,
   };
-  const aggDenom =
+  const aggregateDenominator =
     aggregate.presentDays + aggregate.halfDays + aggregate.absentDays;
   aggregate.attendancePercentage =
-    aggDenom > 0
+    aggregateDenominator > 0
       ? Math.round(
-          ((aggregate.presentDays + aggregate.halfDays * 0.5) / aggDenom) *
+          ((aggregate.presentDays + aggregate.halfDays * 0.5) /
+            aggregateDenominator) *
             10000,
         ) / 100
       : 0;
@@ -794,8 +854,8 @@ export async function getWebAttendanceRecords(callerRoles, callerId, filters) {
       },
     };
   }
-  const [punches, regularizations, leaves, holidays] = await Promise.all([
-    prisma.attendancePunch.findMany({
+  const [summaries, holidays] = await Promise.all([
+    prisma.attendanceSummary.findMany({
       where: {
         userId: { in: userIds },
         attendanceDate: {
@@ -803,72 +863,42 @@ export async function getWebAttendanceRecords(callerRoles, callerId, filters) {
           lte: new Date(effectiveEnd),
         },
       },
-    }),
-    prisma.attendanceRegularization.findMany({
-      where: {
-        userId: { in: userIds },
-        attendanceDate: {
-          gte: new Date(effectiveStart),
-          lte: new Date(effectiveEnd),
+      include: {
+        leaveRequest: { select: { id: true, status: true } },
+        regularization: {
+          select: { id: true, overrideStatus: true, reason: true },
         },
-      },
-    }),
-    prisma.leaveRequest.findMany({
-      where: {
-        userId: { in: userIds },
-        status: { in: [LeaveStatus.APPROVED, LeaveStatus.PENDING] },
-        startDate: { lte: new Date(effectiveEnd) },
-        endDate: { gte: new Date(effectiveStart) },
       },
     }),
     getHolidaysInRange(effectiveStart, effectiveEnd),
   ]);
   const holidayMap = buildHolidayDateMap(holidays);
-  const punchesByUserId = buildDateKeyedMapsByUserId(punches);
-  const regularizationsByUserId = buildDateKeyedMapsByUserId(regularizations);
-  const leaveDatesByUserId = buildApprovedLeaveDateMapsByUserId(
-    leaves,
-    holidayMap,
-  );
+  const summariesByUserId = buildDateKeyedMapsByUserId(summaries);
   const dates = dateRange(effectiveStart, effectiveEnd);
-  const { FULL_DAY_MINUTES } = env();
   const rows = [];
   for (const user of users) {
-    const userPunches = punchesByUserId.get(user.id) || new Map();
-    const userRegularizations =
-      regularizationsByUserId.get(user.id) || new Map();
-    const userLeaveDates = leaveDatesByUserId.get(user.id) || new Map();
+    const userSummaries = summariesByUserId.get(user.id) || new Map();
     const userLocation = serializeAttendanceProfileLocation(
       user.attendanceProfile,
     );
-    // Only consider dates from user's creation date onwards
     const userCreatedDate = user.createdAt
       ? user.createdAt.toISOString().slice(0, 10)
       : null;
     for (const date of dates) {
-      // Skip dates before user was created
-      if (userCreatedDate && date < userCreatedDate) {
-        continue;
-      }
-      const day = buildAttendanceDay(
+      if (userCreatedDate && date < userCreatedDate) continue;
+      const summary = userSummaries.get(date);
+      const day = buildAttendanceDayFromSummary(
         date,
-        userPunches.get(date),
-        userRegularizations.get(date),
+        summary,
         holidayMap.get(date),
-        userLeaveDates.get(date),
-        FULL_DAY_MINUTES,
         {
           includeLocation: true,
           location: userLocation,
         },
       );
       // Avoid returning empty "today" rows for every user before they punch in.
-      if (date === today && !day.punchInAt) {
-        continue;
-      }
-      if (!matchesAttendanceStatus(day, filters.status)) {
-        continue;
-      }
+      if (date === today && !summary) continue;
+      if (!matchesAttendanceStatus(day, filters.status)) continue;
       rows.push({
         user: { id: user.id, fullName: user.fullName, email: user.email },
         ...day,
@@ -946,40 +976,49 @@ export async function upsertRegularization(
         60000,
     );
   }
-  return prisma.attendanceRegularization.upsert({
-    where: {
-      userId_attendanceDate: {
+  return prisma.$transaction(async (tx) => {
+    const regularization = await tx.attendanceRegularization.upsert({
+      where: {
+        userId_attendanceDate: {
+          userId: targetUserId,
+          attendanceDate: new Date(date),
+        },
+      },
+      create: {
         userId: targetUserId,
         attendanceDate: new Date(date),
+        overrideStatus: data.overrideStatus,
+        overridePunchInAt: data.overridePunchInAt
+          ? new Date(data.overridePunchInAt)
+          : null,
+        overridePunchOutAt: data.overridePunchOutAt
+          ? new Date(data.overridePunchOutAt)
+          : null,
+        overrideWorkedMinutes: overrideWorkedMinutes,
+        reason: data.reason,
+        actionByUserId: callerId,
       },
-    },
-    create: {
-      userId: targetUserId,
-      attendanceDate: new Date(date),
-      overrideStatus: data.overrideStatus,
-      overridePunchInAt: data.overridePunchInAt
-        ? new Date(data.overridePunchInAt)
-        : null,
-      overridePunchOutAt: data.overridePunchOutAt
-        ? new Date(data.overridePunchOutAt)
-        : null,
-      overrideWorkedMinutes: overrideWorkedMinutes,
-      reason: data.reason,
-      actionByUserId: callerId,
-    },
-    update: {
-      overrideStatus: data.overrideStatus,
-      overridePunchInAt: data.overridePunchInAt
-        ? new Date(data.overridePunchInAt)
-        : null,
-      overridePunchOutAt: data.overridePunchOutAt
-        ? new Date(data.overridePunchOutAt)
-        : null,
-      overrideWorkedMinutes: overrideWorkedMinutes,
-      reason: data.reason,
-      actionByUserId: callerId,
-    },
-    include: { actionBy: { select: { id: true, fullName: true } } },
+      update: {
+        overrideStatus: data.overrideStatus,
+        overridePunchInAt: data.overridePunchInAt
+          ? new Date(data.overridePunchInAt)
+          : null,
+        overridePunchOutAt: data.overridePunchOutAt
+          ? new Date(data.overridePunchOutAt)
+          : null,
+        overrideWorkedMinutes: overrideWorkedMinutes,
+        reason: data.reason,
+        actionByUserId: callerId,
+      },
+      include: { actionBy: { select: { id: true, fullName: true } } },
+    });
+    await upsertSummaryFromRegularization(
+      targetUserId,
+      date,
+      regularization,
+      tx,
+    );
+    return regularization;
   });
 }
 /**
@@ -1011,8 +1050,11 @@ export async function deleteRegularization(
     },
   });
   if (!existing) throw new NotFoundError("Regularization");
-  // Hard delete is acceptable since audit action is represented by who removed it (request actor).
-  await prisma.attendanceRegularization.delete({ where: { id: existing.id } });
+  await prisma.$transaction(async (tx) => {
+    // Hard delete is acceptable since audit action is represented by who removed it (request actor).
+    await tx.attendanceRegularization.delete({ where: { id: existing.id } });
+    await rebuildSummaryForDate(targetUserId, date, tx);
+  });
   return { deleted: true };
 }
 //# sourceMappingURL=attendance.service.js.map
