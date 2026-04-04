@@ -8,31 +8,7 @@ import { createApp } from "./app.js";
 import { env } from "./config/env.js";
 import { logger } from "./config/logger.js";
 import { getPrisma, disconnectPrisma } from "./config/database.js";
-// import { rebuildAllAttendanceSummaries } from './modules/attendance/attendance-summary.service.js';
-async function bootstrapAttendanceSummaries() {
-  const prisma = getPrisma();
-  const [summaryCount, punchCount, regularizationCount, approvedLeaveCount] =
-    await Promise.all([
-      prisma.attendanceSummary.count(),
-      prisma.attendancePunch.count(),
-      prisma.attendanceRegularization.count(),
-      prisma.leaveRequest.count({ where: { status: "APPROVED" } }),
-    ]);
-  const sourceRecordCount =
-    punchCount + regularizationCount + approvedLeaveCount;
-  if (summaryCount > 0 || sourceRecordCount === 0) {
-    return;
-  }
-  logger.warn(
-    { sourceRecordCount },
-    "Attendance summaries are empty. Rebuilding from source records before startup...",
-  );
-  const result = await rebuildAllAttendanceSummaries(prisma);
-  logger.info(
-    { deletedCount: result.deletedCount, createdCount: result.createdCount },
-    "Attendance summaries rebuilt",
-  );
-}
+
 async function main() {
   const e = env();
   const app = createApp();
@@ -44,7 +20,7 @@ async function main() {
     logger.error(err, "Failed to connect to database");
     process.exit(1);
   }
-  await bootstrapAttendanceSummaries();
+  // await bootstrapAttendanceSummaries();
   const server = app.listen(e.PORT, () => {
     logger.info(`Server running on port ${e.PORT}`);
     logger.info(`Swagger docs at http://localhost:${e.PORT}/docs`);

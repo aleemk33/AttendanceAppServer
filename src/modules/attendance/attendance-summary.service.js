@@ -151,18 +151,19 @@ export function getEffectiveSummaryWorkedMinutes(date, summary) {
     return null;
   }
 
-  if (
-    summary.status === AttendanceSummaryStatus.WORKING &&
-    !isToday(date)
-  ) {
-    return summary.workedMinutes ?? getClosedPunchFallbackWorkedMinutes(summary);
+  if (summary.status === AttendanceSummaryStatus.WORKING && !isToday(date)) {
+    return (
+      summary.workedMinutes ?? getClosedPunchFallbackWorkedMinutes(summary)
+    );
   }
 
   if (
     summary.status === AttendanceSummaryStatus.HALF_DAY &&
     summary.source === AttendanceSummarySource.PUNCH
   ) {
-    return summary.workedMinutes ?? getClosedPunchFallbackWorkedMinutes(summary);
+    return (
+      summary.workedMinutes ?? getClosedPunchFallbackWorkedMinutes(summary)
+    );
   }
 
   return summary.workedMinutes ?? null;
@@ -313,22 +314,6 @@ function buildSummaryRows({
   return rows;
 }
 
-// function buildSummaryRowKey(userId, attendanceDate) {
-//   return buildSummaryKey(userId, toDateKey(attendanceDate));
-// }
-
-// function buildSummarySignature(row) {
-//   return JSON.stringify([
-//     row.status,
-//     row.source,
-//     row.punchInAt ? row.punchInAt.toISOString() : null,
-//     row.punchOutAt ? row.punchOutAt.toISOString() : null,
-//     row.workedMinutes ?? null,
-//     row.leaveRequestId ?? null,
-//     row.regularizationId ?? null,
-//   ]);
-// }
-
 async function withOptionalTransaction(db, work) {
   if (typeof db?.$transaction === "function") {
     return db.$transaction(async (tx) => work(tx));
@@ -416,25 +401,6 @@ async function buildRangeSummaryRows(
 
   return { start, end, userIds, rows };
 }
-
-// async function buildAllSummaryRows(db) {
-//   const [punches, regularizations, approvedLeaves, holidayDates] =
-//     await Promise.all([
-//       db.attendancePunch.findMany(),
-//       db.attendanceRegularization.findMany(),
-//       db.leaveRequest.findMany({
-//         where: { status: LeaveStatus.APPROVED },
-//       }),
-//       getHolidayDatesInRange("1970-01-01", "2999-12-31", db),
-//     ]);
-
-//   return buildSummaryRows({
-//     punches,
-//     regularizations,
-//     approvedLeaves,
-//     holidayDates,
-//   });
-// }
 
 export async function getConflictingSourceDatesForLeave(
   leaveRequest,
@@ -645,80 +611,6 @@ export async function rebuildSummaryForDate(userId, date, db = getPrisma()) {
   const result = await rebuildSummariesForDateRange(date, date, db, [userId]);
   return result.deletedCount > 0 || result.createdCount > 0 ? result : null;
 }
-
-// export async function rebuildAllAttendanceSummaries(db = getPrisma()) {
-//   return withOptionalTransaction(db, async (tx) => {
-//     const rows = await buildAllSummaryRows(tx);
-//     const deleteResult = await tx.attendanceSummary.deleteMany({});
-
-//     await createSummariesInBatches(rows, tx);
-
-//     return {
-//       deletedCount: deleteResult.count,
-//       createdCount: rows.length,
-//     };
-//   });
-// }
-
-// export async function getAttendanceSummaryHealth(db = getPrisma()) {
-//   const [expectedRows, actualSummaries] = await Promise.all([
-//     buildAllSummaryRows(db),
-//     db.attendanceSummary.findMany({
-//       select: {
-//         userId: true,
-//         attendanceDate: true,
-//         status: true,
-//         source: true,
-//         punchInAt: true,
-//         punchOutAt: true,
-//         workedMinutes: true,
-//         leaveRequestId: true,
-//         regularizationId: true,
-//       },
-//     }),
-//   ]);
-
-//   const expectedByKey = new Map(
-//     expectedRows.map((row) => [
-//       buildSummaryRowKey(row.userId, row.attendanceDate),
-//       buildSummarySignature(row),
-//     ]),
-//   );
-//   const actualByKey = new Map(
-//     actualSummaries.map((row) => [
-//       buildSummaryRowKey(row.userId, row.attendanceDate),
-//       buildSummarySignature(row),
-//     ]),
-//   );
-
-//   let missingCount = 0;
-//   let mismatchedCount = 0;
-//   for (const [key, expectedSignature] of expectedByKey) {
-//     if (!actualByKey.has(key)) {
-//       missingCount++;
-//       continue;
-//     }
-//     if (actualByKey.get(key) !== expectedSignature) {
-//       mismatchedCount++;
-//     }
-//   }
-
-//   let extraCount = 0;
-//   for (const key of actualByKey.keys()) {
-//     if (!expectedByKey.has(key)) {
-//       extraCount++;
-//     }
-//   }
-
-//   return {
-//     expectedCount: expectedByKey.size,
-//     actualCount: actualByKey.size,
-//     missingCount,
-//     extraCount,
-//     mismatchedCount,
-//     needsRepair: missingCount > 0 || extraCount > 0 || mismatchedCount > 0,
-//   };
-// }
 
 export async function deleteSummaryForLeave(leaveRequestId, db = getPrisma()) {
   return db.attendanceSummary.deleteMany({

@@ -682,7 +682,6 @@ export async function getWebAttendanceOverview(callerRoles, callerId, filters) {
       skip: (filters.page - 1) * filters.limit,
       take: filters.limit,
     }),
-    buildAttendanceDayFromSummary,
   ]);
   const userIds = users.map((user) => user.id);
   const [summaries, holidays] = await Promise.all([
