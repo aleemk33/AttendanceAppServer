@@ -14,6 +14,10 @@ import {
   isWeeklyOff,
   clampEndDate,
 } from "../../common/index.js";
+import {
+  getAggregateWorkedMinutes,
+  getEffectiveSummaryWorkedMinutes,
+} from "../attendance/attendance-summary.service.js";
 // ─── Mobile Dashboard ────────────────────────────────────────────────────────
 /**
  * Mobile dashboard aggregation for a single employee.
@@ -66,7 +70,7 @@ export async function getMobileDashboard(userId) {
         status: "completed",
         punchInAt: todaySummary.punchInAt.toISOString(),
         punchOutAt: todaySummary.punchOutAt.toISOString(),
-        workedMinutes: todaySummary.workedMinutes,
+        workedMinutes: getEffectiveSummaryWorkedMinutes(today, todaySummary),
       };
     } else if (todaySummary.status === AttendanceSummaryStatus.ON_LEAVE) {
       todayStatus = { date: today, status: "onLeave" };
@@ -162,14 +166,15 @@ export async function getMobileDashboard(userId) {
     }
     const summary = summaryMap.get(date);
     if (summary) {
-      totalWorkMinutes += summary.workedMinutes ?? 0;
       switch (summary.status) {
         case AttendanceSummaryStatus.PRESENT:
           presentDays++;
+          totalWorkMinutes += getAggregateWorkedMinutes(date, summary);
           break;
         case AttendanceSummaryStatus.HALF_DAY:
         case AttendanceSummaryStatus.WORKING:
           halfDays++;
+          totalWorkMinutes += getAggregateWorkedMinutes(date, summary);
           break;
         case AttendanceSummaryStatus.ABSENT:
           absentDays++;
@@ -209,7 +214,7 @@ export async function getMobileDashboard(userId) {
       let status = "absent";
       let wm = null;
       if (summary) {
-        wm = summary.workedMinutes;
+        wm = getEffectiveSummaryWorkedMinutes(cursor, summary);
         switch (summary.status) {
           case AttendanceSummaryStatus.PRESENT:
             status = "present";

@@ -27,6 +27,8 @@ import {
   upsertSummaryFromPunch,
   upsertSummaryFromRegularization,
   rebuildSummaryForDate,
+  getAggregateWorkedMinutes,
+  getEffectiveSummaryWorkedMinutes,
 } from "./attendance-summary.service.js";
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 async function getHolidaysInRange(startDate, endDate) {
@@ -176,6 +178,7 @@ function buildAttendanceDayFromSummary(date, summary, holiday, options = {}) {
   const flags = [];
   let dayType = "workingDay";
   let attendanceState;
+  const workedMinutes = getEffectiveSummaryWorkedMinutes(date, summary);
 
   // 1) weekly off / holiday always take precedence
   if (isWeeklyOff(date)) {
@@ -223,7 +226,7 @@ function buildAttendanceDayFromSummary(date, summary, holiday, options = {}) {
     attendanceState,
     punchInAt: summary?.punchInAt?.toISOString() ?? null,
     punchOutAt: summary?.punchOutAt?.toISOString() ?? null,
-    workedMinutes: summary?.workedMinutes ?? null,
+    workedMinutes,
     flags,
     holiday: holiday ? { id: holiday.id, title: holiday.title } : null,
     leaveRequest: summary?.leaveRequestId
@@ -721,14 +724,15 @@ export async function getWebAttendanceOverview(callerRoles, callerId, filters) {
       }
       const summary = userSummaries.get(date);
       if (summary) {
-        totalWorkedMinutes += summary.workedMinutes ?? 0;
         switch (summary.status) {
           case AttendanceSummaryStatus.PRESENT:
             presentDays++;
+            totalWorkedMinutes += getAggregateWorkedMinutes(date, summary);
             break;
           case AttendanceSummaryStatus.HALF_DAY:
           case AttendanceSummaryStatus.WORKING:
             halfDays++;
+            totalWorkedMinutes += getAggregateWorkedMinutes(date, summary);
             break;
           case AttendanceSummaryStatus.ABSENT:
             absentDays++;

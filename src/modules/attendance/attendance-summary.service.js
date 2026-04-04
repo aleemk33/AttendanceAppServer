@@ -86,10 +86,8 @@ function getPunchSummaryFields(date, punch) {
 
 function mergeDisplayedAttendanceFields(punch, regularization) {
   return {
-    punchInAt: punch?.punchInAt ?? regularization?.overridePunchInAt ?? null,
-    punchOutAt: punch?.punchOutAt ?? regularization?.overridePunchOutAt ?? null,
-    workedMinutes:
-      punch?.workedMinutes ?? regularization?.overrideWorkedMinutes ?? null,
+    punchInAt: regularization?.overridePunchInAt ?? punch?.punchInAt ?? null,
+    punchOutAt: regularization?.overridePunchOutAt ?? punch?.punchOutAt ?? null,
   };
 }
 
@@ -101,7 +99,8 @@ function buildSummaryRowData(date, punch, regularization, leave) {
       source: AttendanceSummarySource.LEAVE,
       punchInAt: displayed.punchInAt,
       punchOutAt: displayed.punchOutAt,
-      workedMinutes: displayed.workedMinutes,
+      workedMinutes:
+        regularization?.overrideWorkedMinutes ?? punch?.workedMinutes ?? null,
       leaveRequestId: leave.id,
       regularizationId: regularization?.id ?? null,
     };
@@ -114,7 +113,7 @@ function buildSummaryRowData(date, punch, regularization, leave) {
       source: AttendanceSummarySource.REGULARIZATION,
       punchInAt: displayed.punchInAt,
       punchOutAt: displayed.punchOutAt,
-      workedMinutes: displayed.workedMinutes,
+      workedMinutes: regularization.overrideWorkedMinutes ?? null,
       leaveRequestId: null,
       regularizationId: regularization.id,
     };
@@ -131,6 +130,57 @@ function buildSummaryRowData(date, punch, regularization, leave) {
   }
 
   return null;
+}
+
+function getClosedPunchFallbackWorkedMinutes(summary) {
+  const { HALF_DAY_MINUTES } = env();
+
+  if (
+    summary?.source === AttendanceSummarySource.PUNCH &&
+    ((summary.punchInAt && !summary.punchOutAt) ||
+      (!summary.punchInAt && summary.punchOutAt))
+  ) {
+    return HALF_DAY_MINUTES;
+  }
+
+  return null;
+}
+
+export function getEffectiveSummaryWorkedMinutes(date, summary) {
+  if (!summary) {
+    return null;
+  }
+
+  if (
+    summary.status === AttendanceSummaryStatus.WORKING &&
+    !isToday(date)
+  ) {
+    return summary.workedMinutes ?? getClosedPunchFallbackWorkedMinutes(summary);
+  }
+
+  if (
+    summary.status === AttendanceSummaryStatus.HALF_DAY &&
+    summary.source === AttendanceSummarySource.PUNCH
+  ) {
+    return summary.workedMinutes ?? getClosedPunchFallbackWorkedMinutes(summary);
+  }
+
+  return summary.workedMinutes ?? null;
+}
+
+export function getAggregateWorkedMinutes(date, summary) {
+  if (!summary) {
+    return 0;
+  }
+
+  switch (summary.status) {
+    case AttendanceSummaryStatus.PRESENT:
+    case AttendanceSummaryStatus.HALF_DAY:
+    case AttendanceSummaryStatus.WORKING:
+      return getEffectiveSummaryWorkedMinutes(date, summary) ?? 0;
+    default:
+      return 0;
+  }
 }
 
 async function getHolidayDatesInRange(startDate, endDate, db = getPrisma()) {
@@ -531,7 +581,8 @@ export async function upsertSummaryFromRegularization(
       data: {
         punchInAt: displayed.punchInAt,
         punchOutAt: displayed.punchOutAt,
-        workedMinutes: displayed.workedMinutes,
+        workedMinutes:
+          regularization.overrideWorkedMinutes ?? punch?.workedMinutes ?? null,
         regularizationId: regularization.id,
       },
     });
