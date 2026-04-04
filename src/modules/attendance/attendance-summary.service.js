@@ -617,3 +617,36 @@ export async function deleteSummaryForLeave(leaveRequestId, db = getPrisma()) {
     where: { leaveRequestId },
   });
 }
+
+async function buildAllSummaryRows(db) {
+  const [punches, regularizations, approvedLeaves, holidayDates] =
+    await Promise.all([
+      db.attendancePunch.findMany(),
+      db.attendanceRegularization.findMany(),
+      db.leaveRequest.findMany({
+        where: { status: LeaveStatus.APPROVED },
+      }),
+      getHolidayDatesInRange("1970-01-01", "2999-12-31", db),
+    ]);
+
+  return buildSummaryRows({
+    punches,
+    regularizations,
+    approvedLeaves,
+    holidayDates,
+  });
+}
+
+export async function rebuildAllAttendanceSummaries(db = getPrisma()) {
+  return withOptionalTransaction(db, async (tx) => {
+    const rows = await buildAllSummaryRows(tx);
+    const deleteResult = await tx.attendanceSummary.deleteMany({});
+
+    await createSummariesInBatches(rows, tx);
+
+    return {
+      deletedCount: deleteResult.count,
+      createdCount: rows.length,
+    };
+  });
+}
