@@ -6,27 +6,27 @@ import {
   requireDeviceId,
 } from "../../middlewares/index.js";
 import { validate } from "../../middlewares/validate.js";
+import * as authController from "../../modules/auth/auth.controller.js";
 import {
-  authController,
   googleLoginMobileSchema,
   refreshTokenSchema,
   deviceChangeRequestSchema,
-} from "../../modules/auth/index.js";
-import { usersController } from "../../modules/users/index.js";
+} from "../../modules/auth/auth.schemas.js";
+import * as usersController from "../../modules/users/users.controller.js";
+import * as attendanceController from "../../modules/attendance/attendance.controller.js";
 import {
-  attendanceController,
   punchInSchema,
   attendanceOverviewQuerySchema,
-} from "../../modules/attendance/index.js";
+} from "../../modules/attendance/attendance.schemas.js";
+import * as leavesController from "../../modules/leaves/leaves.controller.js";
 import {
-  leavesController,
   createLeaveRequestSchema,
-} from "../../modules/leaves/index.js";
+} from "../../modules/leaves/leaves.schemas.js";
+import * as deviceChangesController from "../../modules/device-changes/device-changes.controller.js";
 import {
-  deviceChangesController,
   createDeviceChangeSchema,
-} from "../../modules/device-changes/index.js";
-import { dashboardController } from "../../modules/dashboard/index.js";
+} from "../../modules/device-changes/device-changes.schemas.js";
+import * as dashboardController from "../../modules/dashboard/dashboard.controller.js";
 import { Portal, Role } from "@prisma/client";
 const router = Router();
 // Public auth endpoints (no bearer token required).

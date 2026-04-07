@@ -4,18 +4,16 @@ import helmet from 'helmet';
 import compression from 'compression';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import { pinoHttp } from 'pino-http';
-import swaggerUi from 'swagger-ui-express';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
 import { errorHandler } from './middlewares/error-handler.js';
 import mobileRoutes from './routes/mobile/index.js';
 import webRoutes from './routes/web/index.js';
-import { openApiDocument } from './docs/openapi.js';
 import { sendSuccess } from './common/response.js';
 /**
  * Creates the full Express application with:
  * - cross-cutting middleware (security, compression, CORS, logging)
- * - public utility routes (`/health`, `/docs`)
+ * - public utility routes (`/health`)
  * - versioned API route groups (`/api/v1/mobile`, `/api/v1/web`)
  * - terminal error handler
  */
@@ -36,8 +34,6 @@ export function createApp() {
     app.get('/health', (_req, res) => {
         sendSuccess(res, { status: 'ok', timestamp: new Date().toISOString() });
     });
-    // OpenAPI UI, mounted separately from API namespace for easier discovery.
-    app.use('/docs', swaggerUi.serve, swaggerUi.setup(openApiDocument));
     // Keep portal routes isolated so auth/authorization policies can differ cleanly.
     app.use('/api/v1/mobile', mobileRoutes);
     app.use('/api/v1/web', webRoutes);

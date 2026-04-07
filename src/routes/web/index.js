@@ -5,45 +5,45 @@ import {
   requireRoles,
 } from "../../middlewares/index.js";
 import { validate } from "../../middlewares/validate.js";
+import * as authController from "../../modules/auth/auth.controller.js";
 import {
-  authController,
   googleLoginWebSchema,
   refreshTokenSchema,
-} from "../../modules/auth/index.js";
+} from "../../modules/auth/auth.schemas.js";
+import * as usersController from "../../modules/users/users.controller.js";
 import {
-  usersController,
   createUserSchema,
   updateUserSchema,
   listUsersQuerySchema,
   attendanceProfileSchema,
-} from "../../modules/users/index.js";
+} from "../../modules/users/users.schemas.js";
+import * as attendanceController from "../../modules/attendance/attendance.controller.js";
 import {
-  attendanceController,
   regularizationSchema,
   webAttendanceRecordsQuerySchema,
   webAttendanceOverviewQuerySchema,
   attendanceOverviewQuerySchema,
-} from "../../modules/attendance/index.js";
+} from "../../modules/attendance/attendance.schemas.js";
+import * as leavesController from "../../modules/leaves/leaves.controller.js";
 import {
-  leavesController,
   leaveActionSchema,
   leaveRejectSchema,
   listLeaveRequestsQuerySchema,
-} from "../../modules/leaves/index.js";
+} from "../../modules/leaves/leaves.schemas.js";
+import * as deviceChangesController from "../../modules/device-changes/device-changes.controller.js";
 import {
-  deviceChangesController,
   deviceChangeActionSchema,
   deviceChangeRejectSchema,
   listDeviceChangeQuerySchema,
-} from "../../modules/device-changes/index.js";
+} from "../../modules/device-changes/device-changes.schemas.js";
+import * as holidaysController from "../../modules/holidays/holidays.controller.js";
 import {
-  holidaysController,
   createHolidaySchema,
   updateHolidaySchema,
   deleteHolidaySchema,
   listHolidaysQuerySchema,
-} from "../../modules/holidays/index.js";
-import { dashboardController } from "../../modules/dashboard/index.js";
+} from "../../modules/holidays/holidays.schemas.js";
+import * as dashboardController from "../../modules/dashboard/dashboard.controller.js";
 import { Portal, Role } from "@prisma/client";
 const router = Router();
 // Public auth endpoints (login / refresh / logout).
