@@ -1,6 +1,6 @@
 import pino from 'pino';
 import { env } from './env.js';
-export function createLogger() {
+function createLogger() {
     const e = env();
     return pino({
         // Runtime log verbosity is fully environment-driven.

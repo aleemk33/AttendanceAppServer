@@ -5,7 +5,10 @@ import {
   ConflictError,
   ForbiddenError,
   NotFoundError,
-} from "../../common/errors.js";
+  buildManagerScopeWhere,
+  assertDirectReportAccess,
+  isManagerScoped,
+} from "../../common/index.js";
 import { paginate, paginationMeta } from "../../common/pagination.js";
 // Business rule: ADMIN is exclusive and cannot be mixed with operational roles.
 const INVALID_ROLE_COMBOS = [
@@ -32,9 +35,7 @@ export async function listUsers(callerRoles, callerId, filters) {
   const prisma = getPrisma();
   const where = {};
   // Non-admin managers are tenant-scoped to their direct-report subtree (one level).
-  if (callerRoles.includes(Role.MANAGER) && !callerRoles.includes(Role.ADMIN)) {
-    where.managerUserId = callerId;
-  }
+  Object.assign(where, buildManagerScopeWhere(callerRoles, callerId));
   // Text search spans both name and email for flexible admin lookup.
   if (filters.search) {
     where.OR = [
@@ -91,11 +92,7 @@ export async function getUserById(callerRoles, callerId, userId) {
   });
   if (!user) throw new NotFoundError("User");
   // Scope check mirrors listUsers to avoid privilege escalation by direct ID lookup.
-  if (callerRoles.includes(Role.MANAGER) && !callerRoles.includes(Role.ADMIN)) {
-    if (user.managerUserId !== callerId) {
-      throw new ForbiddenError("You can only view your direct reports");
-    }
-  }
+  assertDirectReportAccess(callerRoles, callerId, user, 'view');
   return user;
 }
 /**
@@ -111,7 +108,7 @@ export async function createUser(callerRoles, callerId, data) {
   const prisma = getPrisma();
   validateRoleCombination(data.roles);
   // Manager bootstrap guard: they can only onboard employees under themselves.
-  if (callerRoles.includes(Role.MANAGER) && !callerRoles.includes(Role.ADMIN)) {
+  if (isManagerScoped(callerRoles)) {
     if (data.roles.length !== 1 || !data.roles.includes(Role.EMPLOYEE)) {
       throw new ForbiddenError("Managers can only create EMPLOYEE users");
     }
@@ -157,10 +154,8 @@ export async function updateUser(callerRoles, callerId, userId, data) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) throw new NotFoundError("User");
   // Manager scope + mutation restrictions.
-  if (callerRoles.includes(Role.MANAGER) && !callerRoles.includes(Role.ADMIN)) {
-    if (user.managerUserId !== callerId) {
-      throw new ForbiddenError("You can only update your direct reports");
-    }
+  if (isManagerScoped(callerRoles)) {
+    assertDirectReportAccess(callerRoles, callerId, user, 'update');
     // Managers cannot change roles or reassign manager
     if (data.roles || data.managerUserId !== undefined) {
       throw new ForbiddenError(
@@ -200,11 +195,7 @@ export async function getAttendanceProfile(callerRoles, callerId, userId) {
   const prisma = getPrisma();
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) throw new NotFoundError("User");
-  if (callerRoles.includes(Role.MANAGER) && !callerRoles.includes(Role.ADMIN)) {
-    if (user.managerUserId !== callerId) {
-      throw new ForbiddenError("You can only view your direct reports");
-    }
-  }
+  assertDirectReportAccess(callerRoles, callerId, user, 'view');
   // Self-heal missing profile rows for legacy users or partial migrations.
   let profile = await prisma.attendanceProfile.findUnique({
     where: { userId },
@@ -231,11 +222,7 @@ export async function updateAttendanceProfile(
   const prisma = getPrisma();
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) throw new NotFoundError("User");
-  if (callerRoles.includes(Role.MANAGER) && !callerRoles.includes(Role.ADMIN)) {
-    if (user.managerUserId !== callerId) {
-      throw new ForbiddenError("You can only update your direct reports");
-    }
-  }
+  assertDirectReportAccess(callerRoles, callerId, user, 'update');
   // Upsert keeps this endpoint idempotent and handles first-time profile setup.
   return prisma.attendanceProfile.upsert({
     where: { userId },

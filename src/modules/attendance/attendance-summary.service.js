@@ -7,7 +7,8 @@ import {
 } from "@prisma/client";
 import { getPrisma } from "../../config/database.js";
 import { env } from "../../config/env.js";
-import { isToday, isWeeklyOff, dateRange } from "../../common/index.js";
+import { isToday, isWeeklyOff, dateRange, toDateString } from "../../common/index.js";
+import { getHolidayDatesInRange } from "../holidays/holidays.helpers.js";
 
 // Keep parity with the current server behavior: LEAVE > REGULARIZATION > PUNCH.
 const SOURCE_PRIORITY = {
@@ -18,12 +19,6 @@ const SOURCE_PRIORITY = {
 
 function getSourcePriority(source) {
   return SOURCE_PRIORITY[source] || 0;
-}
-
-function toDateKey(value) {
-  return typeof value === "string"
-    ? value.slice(0, 10)
-    : value.toISOString().slice(0, 10);
 }
 
 function buildSummaryKey(userId, date) {
@@ -136,9 +131,7 @@ function getClosedPunchFallbackWorkedMinutes(summary) {
   const { HALF_DAY_MINUTES } = env();
 
   if (
-    summary?.source === AttendanceSummarySource.PUNCH &&
-    ((summary.punchInAt && !summary.punchOutAt) ||
-      (!summary.punchInAt && summary.punchOutAt))
+    summary?.source === AttendanceSummarySource.PUNCH && summary.punchInAt && !summary.punchOutAt
   ) {
     return HALF_DAY_MINUTES;
   }
@@ -184,32 +177,10 @@ export function getAggregateWorkedMinutes(date, summary) {
   }
 }
 
-async function getHolidayDatesInRange(startDate, endDate, db = getPrisma()) {
-  const holidays = await db.holiday.findMany({
-    where: {
-      isDeleted: false,
-      startDate: { lte: new Date(endDate) },
-      endDate: { gte: new Date(startDate) },
-    },
-  });
-
-  const set = new Set();
-  for (const holiday of holidays) {
-    const dates = dateRange(
-      holiday.startDate.toISOString().slice(0, 10),
-      holiday.endDate.toISOString().slice(0, 10),
-    );
-    for (const date of dates) {
-      set.add(date);
-    }
-  }
-  return set;
-}
-
 async function getEffectiveApprovedLeaveDates(leaveRequest, db = getPrisma()) {
   const leaveDates = dateRange(
-    leaveRequest.startDate.toISOString().slice(0, 10),
-    leaveRequest.endDate.toISOString().slice(0, 10),
+    toDateString(leaveRequest.startDate),
+    toDateString(leaveRequest.endDate),
   );
   const holidayDates = await getHolidayDatesInRange(
     leaveRequest.startDate,
@@ -247,14 +218,14 @@ function buildSummaryRows({
     if (!punch.punchInAt && !punch.punchOutAt) {
       continue;
     }
-    const date = toDateKey(punch.attendanceDate);
+    const date = toDateString(punch.attendanceDate);
     const key = buildSummaryKey(punch.userId, date);
     const existing = summaryInputs.get(key) ?? {};
     summaryInputs.set(key, { ...existing, userId: punch.userId, date, punch });
   }
 
   for (const regularization of regularizations) {
-    const date = toDateKey(regularization.attendanceDate);
+    const date = toDateString(regularization.attendanceDate);
     const key = buildSummaryKey(regularization.userId, date);
     const existing = summaryInputs.get(key) ?? {};
     summaryInputs.set(key, {
@@ -267,8 +238,8 @@ function buildSummaryRows({
 
   for (const leave of approvedLeaves) {
     const leaveDates = dateRange(
-      leave.startDate.toISOString().slice(0, 10),
-      leave.endDate.toISOString().slice(0, 10),
+      toDateString(leave.startDate),
+      toDateString(leave.endDate),
     );
 
     for (const date of leaveDates) {
@@ -328,8 +299,8 @@ async function buildRangeSummaryRows(
   db,
   scopedUserIds = null,
 ) {
-  const start = toDateKey(startDate);
-  const end = toDateKey(endDate);
+  const start = toDateString(startDate);
+  const end = toDateString(endDate);
   const scopedUserSet = scopedUserIds ? new Set(scopedUserIds) : null;
   const whereUserId = scopedUserIds?.length ? { in: scopedUserIds } : undefined;
 
@@ -402,41 +373,6 @@ async function buildRangeSummaryRows(
   return { start, end, userIds, rows };
 }
 
-export async function getConflictingSourceDatesForLeave(
-  leaveRequest,
-  db = getPrisma(),
-) {
-  const effectiveDates = await getEffectiveApprovedLeaveDates(leaveRequest, db);
-  if (effectiveDates.length === 0) {
-    return [];
-  }
-
-  const [punches, regularizations] = await Promise.all([
-    db.attendancePunch.findMany({
-      where: {
-        userId: leaveRequest.userId,
-        attendanceDate: { in: effectiveDates.map((date) => new Date(date)) },
-        OR: [{ punchInAt: { not: null } }, { punchOutAt: { not: null } }],
-      },
-      select: { attendanceDate: true },
-    }),
-    db.attendanceRegularization.findMany({
-      where: {
-        userId: leaveRequest.userId,
-        attendanceDate: { in: effectiveDates.map((date) => new Date(date)) },
-      },
-      select: { attendanceDate: true },
-    }),
-  ]);
-
-  return [
-    ...new Set([
-      ...punches.map((record) => toDateKey(record.attendanceDate)),
-      ...regularizations.map((record) => toDateKey(record.attendanceDate)),
-    ]),
-  ].sort();
-}
-
 export async function upsertSummaryFromPunch(
   userId,
   date,
@@ -450,7 +386,7 @@ export async function upsertSummaryFromPunch(
   if (
     existing &&
     getSourcePriority(existing.source) >
-      getSourcePriority(AttendanceSummarySource.PUNCH)
+    getSourcePriority(AttendanceSummarySource.PUNCH)
   ) {
     return existing;
   }
@@ -481,25 +417,25 @@ export async function upsertSummaryFromApprovedLeave(
     effectiveDates.length === 0
       ? []
       : db.attendancePunch.findMany({
-          where: {
-            userId: leaveRequest.userId,
-            attendanceDate: { in: dateFilters },
-          },
-        }),
+        where: {
+          userId: leaveRequest.userId,
+          attendanceDate: { in: dateFilters },
+        },
+      }),
     effectiveDates.length === 0
       ? []
       : db.attendanceRegularization.findMany({
-          where: {
-            userId: leaveRequest.userId,
-            attendanceDate: { in: dateFilters },
-          },
-        }),
+        where: {
+          userId: leaveRequest.userId,
+          attendanceDate: { in: dateFilters },
+        },
+      }),
   ]);
   const punchMap = new Map(
-    punches.map((record) => [toDateKey(record.attendanceDate), record]),
+    punches.map((record) => [toDateString(record.attendanceDate), record]),
   );
   const regularizationMap = new Map(
-    regularizations.map((record) => [toDateKey(record.attendanceDate), record]),
+    regularizations.map((record) => [toDateString(record.attendanceDate), record]),
   );
   const created = [];
 
@@ -610,12 +546,6 @@ export async function rebuildSummariesForDateRange(
 export async function rebuildSummaryForDate(userId, date, db = getPrisma()) {
   const result = await rebuildSummariesForDateRange(date, date, db, [userId]);
   return result.deletedCount > 0 || result.createdCount > 0 ? result : null;
-}
-
-export async function deleteSummaryForLeave(leaveRequestId, db = getPrisma()) {
-  return db.attendanceSummary.deleteMany({
-    where: { leaveRequestId },
-  });
 }
 
 async function buildAllSummaryRows(db) {

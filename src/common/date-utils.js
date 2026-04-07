@@ -31,7 +31,7 @@ export function parseBusinessDate(dateStr) {
   return DateTime.fromISO(dateStr, { zone: env().BUSINESS_TIMEZONE });
 }
 /** Check if a date is a Sunday */
-export function isSunday(dateStr) {
+function isSunday(dateStr) {
   const dt = parseBusinessDate(dateStr);
   return dt.weekday === 7;
 }
@@ -39,7 +39,7 @@ export function isSunday(dateStr) {
  * Check if a date is a 2nd or 4th Saturday.
  * The Nth Saturday is determined by the ordinal position of Saturdays in the month.
  */
-export function isSecondOrFourthSaturday(dateStr) {
+function isSecondOrFourthSaturday(dateStr) {
   const dt = parseBusinessDate(dateStr);
   if (dt.weekday !== 6) return false;
   // Count which Saturday of the month this is
@@ -99,8 +99,15 @@ export function isToday(dateStr) {
 export function isPast(dateStr) {
   return dateStr < businessToday();
 }
-/** Check if a date is in the future (after today in business timezone) */
-export function isFuture(dateStr) {
-  return dateStr > businessToday();
+/**
+ * Convert Date or ISO string to YYYY-MM-DD format.
+ * @param {Date|string} value
+ * @returns {string}
+ */
+export function toDateString(value) {
+  if (typeof value === 'string') {
+    return value.slice(0, 10);
+  }
+  return value.toISOString().slice(0, 10);
 }
 //# sourceMappingURL=date-utils.js.map

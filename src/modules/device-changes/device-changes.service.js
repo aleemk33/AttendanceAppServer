@@ -1,6 +1,12 @@
-import { DeviceChangeStatus, Role } from '@prisma/client';
+import { DeviceChangeStatus } from '@prisma/client';
 import { getPrisma } from '../../config/database.js';
-import { BadRequestError, ForbiddenError, NotFoundError } from '../../common/errors.js';
+import {
+    BadRequestError,
+    ForbiddenError,
+    NotFoundError,
+    buildManagerScopeUserWhere,
+    assertDirectReportAccess,
+} from '../../common/index.js';
 import { paginate, paginationMeta } from '../../common/pagination.js';
 /**
  * Employee creates a device change request.
@@ -51,9 +57,7 @@ export async function listDeviceChangeRequestsWeb(callerRoles, callerId, filters
     const prisma = getPrisma();
     const where = {};
     // Managers can review only direct-report requests; admins can review all.
-    if (callerRoles.includes(Role.MANAGER) && !callerRoles.includes(Role.ADMIN)) {
-        where.user = { managerUserId: callerId };
-    }
+    Object.assign(where, buildManagerScopeUserWhere(callerRoles, callerId));
     if (filters.status)
         where.status = filters.status;
     if (filters.search) {
@@ -101,11 +105,7 @@ export async function approveDeviceChange(callerRoles, callerId, requestId, acti
     if (dcr.userId === callerId) {
         throw new ForbiddenError('Cannot approve your own device change request');
     }
-    if (callerRoles.includes(Role.MANAGER) && !callerRoles.includes(Role.ADMIN)) {
-        if (dcr.user.managerUserId !== callerId) {
-            throw new ForbiddenError('You can only approve direct reports\' requests');
-        }
-    }
+    assertDirectReportAccess(callerRoles, callerId, dcr.user, 'approve direct reports\' requests');
     /**
      * Transaction ensures device approval state, bound device update, and token revocation
      * are committed atomically.
@@ -156,11 +156,7 @@ export async function rejectDeviceChange(callerRoles, callerId, requestId, actio
     if (dcr.userId === callerId) {
         throw new ForbiddenError('Cannot reject your own device change request');
     }
-    if (callerRoles.includes(Role.MANAGER) && !callerRoles.includes(Role.ADMIN)) {
-        if (dcr.user.managerUserId !== callerId) {
-            throw new ForbiddenError('You can only reject direct reports\' requests');
-        }
-    }
+    assertDirectReportAccess(callerRoles, callerId, dcr.user, 'reject direct reports\' requests');
     return prisma.deviceChangeRequest.update({
         where: { id: requestId },
         data: {

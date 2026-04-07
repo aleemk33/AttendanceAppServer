@@ -20,10 +20,8 @@ async function main() {
     logger.error(err, "Failed to connect to database");
     process.exit(1);
   }
-  // await bootstrapAttendanceSummaries();
   const server = app.listen(e.PORT, () => {
     logger.info(`Server running on port ${e.PORT}`);
-    logger.info(`Swagger docs at http://localhost:${e.PORT}/docs`);
     logger.info(`Environment: ${e.NODE_ENV}`);
   });
   /**

@@ -1,22 +1,15 @@
 import { sendSuccess, sendCreated } from '../../common/response.js';
 import * as attendanceService from './attendance.service.js';
+
 export async function punchIn(req, res) {
-    // Device ID is supplied as a header so client payload shape stays stable.
-    const deviceId = req.headers['x-device-id'];
-    if (!deviceId) {
-        res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'x-device-id header is required' } });
-        return;
-    }
-    const punch = await attendanceService.punchIn(req.user.sub, req.body.latitude, req.body.longitude, deviceId);
+    // Device ID is validated by requireDeviceId middleware
+    const punch = await attendanceService.punchIn(req.user.sub, req.body.latitude, req.body.longitude, req.deviceId);
     sendCreated(res, punch, 'Punched in');
 }
+
 export async function punchOut(req, res) {
-    const deviceId = req.headers['x-device-id'];
-    if (!deviceId) {
-        res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'x-device-id header is required' } });
-        return;
-    }
-    const punch = await attendanceService.punchOut(req.user.sub, deviceId);
+    // Device ID is validated by requireDeviceId middleware
+    const punch = await attendanceService.punchOut(req.user.sub, req.deviceId);
     sendSuccess(res, punch, undefined, 'Punched out');
 }
 export async function myAttendanceOverview(req, res) {

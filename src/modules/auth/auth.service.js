@@ -5,8 +5,6 @@ import { Portal, Role } from '@prisma/client';
 import { env } from '../../config/env.js';
 import { getPrisma } from '../../config/database.js';
 import { UnauthorizedError, ForbiddenError } from '../../common/errors.js';
-const webClient = new OAuth2Client();
-const androidClient = new OAuth2Client();
 // We never store raw refresh tokens; only deterministic SHA-256 hashes.
 function hashToken(token) {
     return createHash('sha256').update(token).digest('hex');
@@ -249,17 +247,6 @@ export async function logout(encodedRefreshToken) {
     const hashed = hashToken(parsed.token);
     await prisma.refreshToken.updateMany({
         where: { tokenHash: hashed, revokedAt: null },
-        data: { revokedAt: new Date() },
-    });
-}
-/**
- * Admin/security helper used after device rebind approval to force mobile
- * re-authentication on all old sessions.
- */
-export async function revokeAllMobileTokens(userId) {
-    const prisma = getPrisma();
-    await prisma.refreshToken.updateMany({
-        where: { userId, portal: Portal.MOBILE, revokedAt: null },
         data: { revokedAt: new Date() },
     });
 }

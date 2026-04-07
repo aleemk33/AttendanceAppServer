@@ -1,15 +1,15 @@
 import { HolidayChangeType } from '@prisma/client';
 import { getPrisma } from '../../config/database.js';
 import { BadRequestError, ConflictError, NotFoundError, } from '../../common/errors.js';
-import { businessToday } from '../../common/index.js';
+import { businessToday, toDateString } from '../../common/index.js';
 import { rebuildSummariesForDateRange } from '../attendance/attendance-summary.service.js';
 // Normalized snapshot stored in change logs for audit/history visibility.
 function holidaySnapshot(h) {
     return {
         title: h.title,
         description: h.description,
-        startDate: h.startDate.toISOString().slice(0, 10),
-        endDate: h.endDate.toISOString().slice(0, 10),
+        startDate: toDateString(h.startDate),
+        endDate: toDateString(h.endDate),
         isDeleted: h.isDeleted,
     };
 }
@@ -29,7 +29,7 @@ async function checkOverlap(startDate, endDate, excludeId) {
     }
 }
 function mergeDateRangeBounds(startA, endA, startB, endB) {
-    const dates = [startA, endA, startB, endB].map((value) => typeof value === 'string' ? value : value.toISOString().slice(0, 10));
+    const dates = [startA, endA, startB, endB].map((value) => toDateString(value));
     return {
         startDate: dates.reduce((min, value) => value < min ? value : min),
         endDate: dates.reduce((max, value) => value > max ? value : max),
@@ -85,11 +85,11 @@ export async function updateHoliday(callerId, holidayId, data) {
         throw new NotFoundError('Holiday');
     // Block edits once holiday has started to keep attendance calculations stable.
     const today = businessToday();
-    if (today >= holiday.startDate.toISOString().slice(0, 10)) {
+    if (today >= toDateString(holiday.startDate)) {
         throw new BadRequestError('Cannot update a holiday that has already started');
     }
-    const newStart = data.startDate || holiday.startDate.toISOString().slice(0, 10);
-    const newEnd = data.endDate || holiday.endDate.toISOString().slice(0, 10);
+    const newStart = data.startDate || toDateString(holiday.startDate);
+    const newEnd = data.endDate || toDateString(holiday.endDate);
     if (newStart > newEnd)
         throw new BadRequestError('startDate must be <= endDate');
     await checkOverlap(newStart, newEnd, holidayId);
@@ -130,7 +130,7 @@ export async function deleteHoliday(callerId, holidayId, reason) {
     if (!holiday || holiday.isDeleted)
         throw new NotFoundError('Holiday');
     const today = businessToday();
-    if (today >= holiday.startDate.toISOString().slice(0, 10)) {
+    if (today >= toDateString(holiday.startDate)) {
         throw new BadRequestError('Cannot delete a holiday that has already started');
     }
     const before = holidaySnapshot(holiday);
