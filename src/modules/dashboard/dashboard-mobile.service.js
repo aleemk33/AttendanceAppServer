@@ -14,6 +14,7 @@ import {
   buildHolidayDateSet,
   computeUserMonthSummary,
 } from "./dashboard.helpers.js";
+import { getHolidaysInRange } from "../holidays/holidays.helpers.js";
 
 /**
  * Mobile dashboard aggregation for a single employee.
@@ -100,13 +101,13 @@ export async function getMobileDashboard(userId) {
     todaySummary?.status === AttendanceSummaryStatus.ON_LEAVE
       ? true
       : await prisma.leaveRequest.findFirst({
-          where: {
-            userId,
-            status: LeaveStatus.APPROVED,
-            startDate: { lte: new Date(today) },
-            endDate: { gte: new Date(today) },
-          },
-        });
+        where: {
+          userId,
+          status: LeaveStatus.APPROVED,
+          startDate: { lte: new Date(today) },
+          endDate: { gte: new Date(today) },
+        },
+      });
   if (todayLeave) {
     todayStatus = { date: today, status: "onLeave" };
   }
@@ -129,13 +130,7 @@ export async function getMobileDashboard(userId) {
         },
       },
     }),
-    prisma.holiday.findMany({
-      where: {
-        isDeleted: false,
-        startDate: { lte: new Date(appliedEndDate) },
-        endDate: { gte: new Date(monthStart) },
-      },
-    }),
+    getHolidaysInRange(monthStart, appliedEndDate),
   ]);
 
   const summaryMap = new Map(

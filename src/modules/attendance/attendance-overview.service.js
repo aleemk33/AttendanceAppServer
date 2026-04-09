@@ -15,7 +15,6 @@ import {
   buildDateKeyedMap,
   buildDateKeyedMapsByUserId,
   buildAttendanceDayFromSummary,
-  serializeAttendanceProfileLocation,
   matchesAttendanceStatus,
   computeSummary,
 } from "./attendance.helpers.js";

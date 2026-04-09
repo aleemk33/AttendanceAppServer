@@ -7,10 +7,7 @@ const envSchema = z.object({
     .default("development"),
   DATABASE_URL: z
     .string()
-    .min(1)
-    .default(
-      "postgresql://attendance_user:attendance_pass@localhost:5432/attendance_db",
-    ),
+    .min(1),
   JWT_ACCESS_SECRET: z.string().min(8).default("supersecretkeyforaccess"),
   JWT_REFRESH_SECRET: z.string().min(8).default("supersecretkeyforrefresh"),
   JWT_ACCESS_TTL: z.string().default("15m"),
@@ -19,19 +16,13 @@ const envSchema = z.object({
   COMPANY_DOMAIN: z.string().min(1).default("b2winfotech.ai"),
   GOOGLE_WEB_CLIENT_ID: z
     .string()
-    .min(1)
-    .default(
-      "514104295700-9nnc6c94c26e3j80o9b4ptm9t7n9i6en.apps.googleusercontent.com",
-    ),
+    .min(1),
   GOOGLE_ANDROID_CLIENT_ID: z
     .string()
-    .min(1)
-    .default(
-      "514104295700-tbsct3qphntps1h28grinkpv2rd6tkfh.apps.googleusercontent.com",
-    ),
+    .min(1),
   FULL_DAY_MINUTES: z.coerce.number().default(540),
   HALF_DAY_MINUTES: z.coerce.number().default(270),
-  CORS_WEB_ORIGIN: z.string().default("http://localhost:3001"),
+  CORS_WEB_ORIGIN: z.string(),
   LOG_LEVEL: z.string().default("info"),
 });
 // Cached singleton to avoid reparsing process.env repeatedly.

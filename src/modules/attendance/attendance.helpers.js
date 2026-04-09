@@ -65,23 +65,6 @@ export function buildDateKeyedMapsByUserId(records) {
   return map;
 }
 
-/**
- * Serializes attendance profile location.
- */
-export function serializeAttendanceProfileLocation(profile) {
-  if (
-    !profile ||
-    profile.officeLatitude == null ||
-    profile.officeLongitude == null
-  ) {
-    return null;
-  }
-  return {
-    latitude: Number(profile.officeLatitude),
-    longitude: Number(profile.officeLongitude),
-  };
-}
-
 function summaryStatusToAttendanceState(status, isCurrentDay = false) {
   switch (status) {
     case AttendanceSummaryStatus.WORKING:
