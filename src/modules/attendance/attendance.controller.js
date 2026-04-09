@@ -3,13 +3,13 @@ import * as attendanceService from './attendance.service.js';
 
 export async function punchIn(req, res) {
     // Device ID is validated by requireDeviceId middleware
-    const punch = await attendanceService.punchIn(req.user.sub, req.body.latitude, req.body.longitude, req.deviceId);
+    const punch = await attendanceService.punchIn(req.user.sub, req.body, req.deviceId);
     sendCreated(res, punch, 'Punched in');
 }
 
 export async function punchOut(req, res) {
     // Device ID is validated by requireDeviceId middleware
-    const punch = await attendanceService.punchOut(req.user.sub, req.deviceId);
+    const punch = await attendanceService.punchOut(req.user.sub, req.deviceId, req.body?.report);
     sendSuccess(res, punch, undefined, 'Punched out');
 }
 export async function myAttendanceOverview(req, res) {

@@ -86,12 +86,21 @@ function mergeDisplayedAttendanceFields(punch, regularization) {
   };
 }
 
+function getPunchMetadataFields(punch) {
+  return {
+    workMode: punch?.workMode ?? null,
+    todayPlan: punch?.todayPlan ?? null,
+    report: punch?.report ?? null,
+  };
+}
+
 function buildSummaryRowData(date, punch, regularization, leave) {
   if (leave) {
     const displayed = mergeDisplayedAttendanceFields(punch, regularization);
     return {
       status: AttendanceSummaryStatus.ON_LEAVE,
       source: AttendanceSummarySource.LEAVE,
+      ...getPunchMetadataFields(punch),
       punchInAt: displayed.punchInAt,
       punchOutAt: displayed.punchOutAt,
       workedMinutes:
@@ -106,6 +115,7 @@ function buildSummaryRowData(date, punch, regularization, leave) {
     return {
       status: mapOverrideStatusToSummaryStatus(regularization.overrideStatus),
       source: AttendanceSummarySource.REGULARIZATION,
+      ...getPunchMetadataFields(punch),
       punchInAt: displayed.punchInAt,
       punchOutAt: displayed.punchOutAt,
       workedMinutes: regularization.overrideWorkedMinutes ?? null,
@@ -118,6 +128,7 @@ function buildSummaryRowData(date, punch, regularization, leave) {
     const punchFields = getPunchSummaryFields(date, punch);
     return {
       ...punchFields,
+      ...getPunchMetadataFields(punch),
       source: AttendanceSummarySource.PUNCH,
       leaveRequestId: null,
       regularizationId: null,
@@ -388,7 +399,11 @@ export async function upsertSummaryFromPunch(
     getSourcePriority(existing.source) >
     getSourcePriority(AttendanceSummarySource.PUNCH)
   ) {
-    return existing;
+    await rebuildSummaryForDate(userId, date, db);
+
+    return db.attendanceSummary.findUnique({
+      where: summaryWhere(userId, date),
+    });
   }
 
   const summaryData = buildSummaryRowData(date, punch, null, null);
@@ -481,6 +496,7 @@ export async function upsertSummaryFromRegularization(
     return db.attendanceSummary.update({
       where: { id: existing.id },
       data: {
+        ...getPunchMetadataFields(punch),
         punchInAt: displayed.punchInAt,
         punchOutAt: displayed.punchOutAt,
         workedMinutes:

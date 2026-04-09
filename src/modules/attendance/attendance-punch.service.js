@@ -1,4 +1,4 @@
-import { LeaveStatus } from "@prisma/client";
+import { LeaveStatus, WorkMode } from "@prisma/client";
 import { getPrisma } from "../../config/database.js";
 import {
   BadRequestError,
@@ -12,6 +12,7 @@ import {
 } from "../../common/index.js";
 import { upsertSummaryFromPunch } from "./attendance-summary.service.js";
 import { getHolidaysInRange, buildHolidayDateMap } from "./attendance.helpers.js";
+import { isWorkFromHomeDay } from "../work-from-home/work-from-home.service.js";
 
 /**
  * Punch-in transaction for mobile app.
@@ -22,9 +23,10 @@ import { getHolidaysInRange, buildHolidayDateMap } from "./attendance.helpers.js
  * 3) geofence check
  * 4) duplicate prevention
  */
-export async function punchIn(userId, latitude, longitude, deviceId) {
+export async function punchIn(userId, payload, deviceId) {
   const prisma = getPrisma();
   const today = businessToday();
+  const { latitude, longitude, todayPlan } = payload;
 
   // Check device binding
   const profile = await prisma.attendanceProfile.findUnique({
@@ -62,24 +64,40 @@ export async function punchIn(userId, latitude, longitude, deviceId) {
     throw new BadRequestError("Cannot punch in while on approved leave");
   }
 
-  // Geofence check
-  if (
-    profile.officeLatitude == null ||
-    profile.officeLongitude == null ||
-    profile.officeRadiusMeters == null
-  ) {
-    throw new BadRequestError("Attendance profile geofence not configured");
-  }
-  const distance = haversineMeters(
-    Number(profile.officeLatitude),
-    Number(profile.officeLongitude),
-    latitude,
-    longitude,
-  );
-  if (distance > profile.officeRadiusMeters) {
-    throw new BadRequestError(
-      `You are ${Math.round(distance)}m from office. Max allowed: ${profile.officeRadiusMeters}m`,
+  const workMode = (await isWorkFromHomeDay(userId, today, prisma))
+    ? WorkMode.WFH
+    : WorkMode.OFFICE;
+
+  if (workMode === WorkMode.WFH) {
+    if (!todayPlan) {
+      throw new BadRequestError("Today's plan is required for WFH punch-in");
+    }
+  } else {
+    if (latitude == null || longitude == null) {
+      throw new BadRequestError(
+        "Latitude and longitude are required for office punch-in",
+      );
+    }
+
+    // Geofence check
+    if (
+      profile.officeLatitude == null ||
+      profile.officeLongitude == null ||
+      profile.officeRadiusMeters == null
+    ) {
+      throw new BadRequestError("Attendance profile geofence not configured");
+    }
+    const distance = haversineMeters(
+      Number(profile.officeLatitude),
+      Number(profile.officeLongitude),
+      latitude,
+      longitude,
     );
+    if (distance > profile.officeRadiusMeters) {
+      throw new BadRequestError(
+        `You are ${Math.round(distance)}m from office. Max allowed: ${profile.officeRadiusMeters}m`,
+      );
+    }
   }
 
   return prisma.$transaction(async (tx) => {
@@ -96,12 +114,18 @@ export async function punchIn(userId, latitude, longitude, deviceId) {
     const punch = existing
       ? await tx.attendancePunch.update({
           where: { id: existing.id },
-          data: { punchInAt: now },
+          data: {
+            punchInAt: now,
+            workMode,
+            todayPlan: workMode === WorkMode.WFH ? todayPlan : null,
+          },
         })
       : await tx.attendancePunch.create({
           data: {
             userId,
             attendanceDate: new Date(today),
+            workMode,
+            todayPlan: workMode === WorkMode.WFH ? todayPlan : null,
             punchInAt: now,
           },
         });
@@ -115,7 +139,7 @@ export async function punchIn(userId, latitude, longitude, deviceId) {
  * Punch-out for current business date.
  * Requires existing punch-in and same bound device.
  */
-export async function punchOut(userId, deviceId) {
+export async function punchOut(userId, deviceId, report) {
   const prisma = getPrisma();
   const today = businessToday();
 
@@ -142,6 +166,9 @@ export async function punchOut(userId, deviceId) {
     if (punch.punchOutAt) {
       throw new ConflictError("Already punched out for today");
     }
+    if (punch.workMode === WorkMode.WFH && !report) {
+      throw new BadRequestError("Report is required for WFH punch-out");
+    }
 
     const now = new Date();
     const workedMinutes = Math.floor(
@@ -149,7 +176,11 @@ export async function punchOut(userId, deviceId) {
     );
     const updatedPunch = await tx.attendancePunch.update({
       where: { id: punch.id },
-      data: { punchOutAt: now, workedMinutes },
+      data: {
+        punchOutAt: now,
+        workedMinutes,
+        report: punch.workMode === WorkMode.WFH ? report : null,
+      },
     });
 
     await upsertSummaryFromPunch(userId, today, updatedPunch, tx);

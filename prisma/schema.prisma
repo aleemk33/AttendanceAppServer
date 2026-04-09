@@ -19,6 +19,11 @@ enum Portal {
   WEB
 }
 
+enum WorkMode {
+  OFFICE
+  WFH
+}
+
 enum OverrideStatus {
   PRESENT
   HALF_DAY
@@ -85,6 +90,8 @@ model User {
   holidaysUpdated            Holiday[]                  @relation("HolidayUpdatedBy")
   holidayChangeLogs          HolidayChangeLog[]
   attendanceSummaries        AttendanceSummary[]
+  workFromHomeDays           WorkFromHomeDay[]          @relation("WorkFromHomeUser")
+  workFromHomeAssignments    WorkFromHomeDay[]          @relation("WorkFromHomeCreatedBy")
 
   @@map("users")
 }
@@ -124,6 +131,9 @@ model AttendancePunch {
   id               String    @id @default(uuid()) @db.Uuid
   userId           String    @map("user_id") @db.Uuid
   attendanceDate   DateTime  @map("attendance_date") @db.Date
+  workMode         WorkMode  @default(OFFICE) @map("work_mode")
+  todayPlan        String?   @map("today_plan") @db.Text
+  report           String?   @db.Text
   punchInAt        DateTime? @map("punch_in_at") @db.Timestamptz()
   punchOutAt       DateTime? @map("punch_out_at") @db.Timestamptz()
   workedMinutes    Int?      @map("worked_minutes")
@@ -135,6 +145,23 @@ model AttendancePunch {
   @@unique([userId, attendanceDate])
   @@index([attendanceDate])
   @@map("attendance_punches")
+}
+
+model WorkFromHomeDay {
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          String   @map("user_id") @db.Uuid
+  attendanceDate  DateTime @map("attendance_date") @db.Date
+  createdByUserId String   @map("created_by_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  user      User @relation("WorkFromHomeUser", fields: [userId], references: [id])
+  createdBy User @relation("WorkFromHomeCreatedBy", fields: [createdByUserId], references: [id])
+
+  @@unique([userId, attendanceDate])
+  @@index([attendanceDate])
+  @@index([createdByUserId])
+  @@map("work_from_home_days")
 }
 
 model AttendanceRegularization {
@@ -244,6 +271,9 @@ model AttendanceSummary {
   attendanceDate    DateTime                @map("attendance_date") @db.Date
   status            AttendanceSummaryStatus
   source            AttendanceSummarySource
+  workMode          WorkMode?               @map("work_mode")
+  todayPlan         String?                 @map("today_plan") @db.Text
+  report            String?                 @db.Text
   punchInAt         DateTime?               @map("punch_in_at") @db.Timestamptz()
   punchOutAt        DateTime?               @map("punch_out_at") @db.Timestamptz()
   workedMinutes     Int?                    @map("worked_minutes")

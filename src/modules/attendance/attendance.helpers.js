@@ -131,6 +131,9 @@ export function buildAttendanceDayFromSummary(date, summary, holiday, options = 
     punchInAt: summary?.punchInAt?.toISOString() ?? null,
     punchOutAt: summary?.punchOutAt?.toISOString() ?? null,
     workedMinutes,
+    workMode: summary?.workMode ?? options.workMode ?? null,
+    todayPlan: summary?.todayPlan ?? options.todayPlan ?? null,
+    report: summary?.report ?? options.report ?? null,
     flags,
     holiday: holiday ? { id: holiday.id, title: holiday.title } : null,
     leaveRequest: summary?.leaveRequestId

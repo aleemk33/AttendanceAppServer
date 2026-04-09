@@ -43,6 +43,11 @@ import {
   deleteHolidaySchema,
   listHolidaysQuerySchema,
 } from "../../modules/holidays/holidays.schemas.js";
+import * as workFromHomeController from "../../modules/work-from-home/work-from-home.controller.js";
+import {
+  listWorkFromHomeQuerySchema,
+  workFromHomeRangesSchema,
+} from "../../modules/work-from-home/work-from-home.schemas.js";
 import * as dashboardController from "../../modules/dashboard/dashboard.controller.js";
 import { Portal, Role } from "@prisma/client";
 const router = Router();
@@ -122,6 +127,12 @@ router.get(
   attendanceController.webAttendanceRecords,
 );
 router.get(
+  "/attendance/work-from-home",
+  requireRoles(Role.MANAGER, Role.ADMIN),
+  validate(listWorkFromHomeQuerySchema, "query"),
+  workFromHomeController.listWorkFromHomeDays,
+);
+router.get(
   "/users/:userId/attendance/overview",
   requireRoles(Role.MANAGER, Role.ADMIN),
   validate(attendanceOverviewQuerySchema, "query"),
@@ -138,6 +149,18 @@ router.delete(
   "/users/:userId/attendance-regularizations/:date",
   requireRoles(Role.MANAGER, Role.ADMIN),
   attendanceController.deleteRegularization,
+);
+router.post(
+  "/users/:userId/attendance/work-from-home",
+  requireRoles(Role.MANAGER, Role.ADMIN),
+  validate(workFromHomeRangesSchema),
+  workFromHomeController.assignWorkFromHomeDays,
+);
+router.delete(
+  "/users/:userId/attendance/work-from-home",
+  requireRoles(Role.MANAGER, Role.ADMIN),
+  validate(workFromHomeRangesSchema),
+  workFromHomeController.deleteWorkFromHomeDays,
 );
 // Leave requests
 router.get(

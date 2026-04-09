@@ -16,6 +16,7 @@ import * as usersController from "../../modules/users/users.controller.js";
 import * as attendanceController from "../../modules/attendance/attendance.controller.js";
 import {
   punchInSchema,
+  punchOutSchema,
   attendanceOverviewQuerySchema,
 } from "../../modules/attendance/attendance.schemas.js";
 import * as leavesController from "../../modules/leaves/leaves.controller.js";
@@ -75,6 +76,7 @@ router.post(
 router.post(
   "/me/attendance/punch-out",
   requireDeviceId,
+  validate(punchOutSchema),
   attendanceController.punchOut,
 );
 // Leave requests

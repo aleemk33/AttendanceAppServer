@@ -8,9 +8,16 @@ const optionalTrimmedString = z.preprocess((value) => {
 }, z.string().optional());
 const dateOnlySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 export const punchInSchema = z.object({
-    latitude: z.number().min(-90).max(90),
-    longitude: z.number().min(-180).max(180),
+    latitude: z.number().min(-90).max(90).optional(),
+    longitude: z.number().min(-180).max(180).optional(),
+    todayPlan: optionalTrimmedString,
+}).refine((value) => (value.latitude == null) === (value.longitude == null), {
+    path: ['longitude'],
+    message: 'latitude and longitude must be provided together',
 });
+export const punchOutSchema = z.object({
+    report: optionalTrimmedString,
+}).default({});
 export const attendanceOverviewQuerySchema = z.object({
     startDate: dateOnlySchema.optional(),
     endDate: dateOnlySchema.optional(),

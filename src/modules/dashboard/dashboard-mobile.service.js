@@ -1,4 +1,4 @@
-import { LeaveStatus, AttendanceSummaryStatus } from "@prisma/client";
+import { LeaveStatus, AttendanceSummaryStatus, WorkMode } from "@prisma/client";
 import { getPrisma } from "../../config/database.js";
 import {
   businessToday,
@@ -15,6 +15,7 @@ import {
   computeUserMonthSummary,
 } from "./dashboard.helpers.js";
 import { getHolidaysInRange } from "../holidays/holidays.helpers.js";
+import { isWorkFromHomeDay } from "../work-from-home/work-from-home.service.js";
 
 /**
  * Mobile dashboard aggregation for a single employee.
@@ -50,17 +51,32 @@ export async function getMobileDashboard(userId) {
     : null;
 
   // Today's live status
-  const todaySummary = await prisma.attendanceSummary.findUnique({
-    where: { userId_attendanceDate: { userId, attendanceDate: new Date(today) } },
-  });
+  const [todaySummary, todayIsWorkFromHome] = await Promise.all([
+    prisma.attendanceSummary.findUnique({
+      where: { userId_attendanceDate: { userId, attendanceDate: new Date(today) } },
+    }),
+    isWorkFromHomeDay(userId, today, prisma),
+  ]);
 
-  let todayStatus = { date: today, status: "notPunchedIn" };
+  const todayWorkMode = todaySummary?.workMode ??
+    (todaySummary ? null : (todayIsWorkFromHome ? WorkMode.WFH : WorkMode.OFFICE));
+
+  let todayStatus = {
+    date: today,
+    status: "notPunchedIn",
+    workMode: todayWorkMode,
+    todayPlan: todaySummary?.todayPlan ?? null,
+    report: todaySummary?.report ?? null,
+  };
   if (todaySummary) {
     if (todaySummary.status === AttendanceSummaryStatus.WORKING) {
       todayStatus = {
         date: today,
         status: "working",
         punchInAt: todaySummary.punchInAt?.toISOString(),
+        workMode: todayWorkMode,
+        todayPlan: todaySummary.todayPlan ?? null,
+        report: todaySummary.report ?? null,
       };
     } else if (todaySummary.punchInAt && todaySummary.punchOutAt) {
       todayStatus = {
@@ -69,15 +85,30 @@ export async function getMobileDashboard(userId) {
         punchInAt: todaySummary.punchInAt.toISOString(),
         punchOutAt: todaySummary.punchOutAt.toISOString(),
         workedMinutes: getEffectiveSummaryWorkedMinutes(today, todaySummary),
+        workMode: todayWorkMode,
+        todayPlan: todaySummary.todayPlan ?? null,
+        report: todaySummary.report ?? null,
       };
     } else if (todaySummary.status === AttendanceSummaryStatus.ON_LEAVE) {
-      todayStatus = { date: today, status: "onLeave" };
+      todayStatus = {
+        date: today,
+        status: "onLeave",
+        workMode: todayWorkMode,
+        todayPlan: todaySummary.todayPlan ?? null,
+        report: todaySummary.report ?? null,
+      };
     }
   }
 
   // Calendar status supersedes raw punch state
   if (isWeeklyOff(today)) {
-    todayStatus = { date: today, status: "weeklyOff" };
+    todayStatus = {
+      date: today,
+      status: "weeklyOff",
+      workMode: todayWorkMode,
+      todayPlan: todaySummary?.todayPlan ?? null,
+      report: todaySummary?.report ?? null,
+    };
   }
 
   // Check if today is a holiday
@@ -93,6 +124,9 @@ export async function getMobileDashboard(userId) {
       date: today,
       status: "holiday",
       holiday: todayHoliday.title,
+      workMode: todayWorkMode,
+      todayPlan: todaySummary?.todayPlan ?? null,
+      report: todaySummary?.report ?? null,
     };
   }
 
@@ -109,7 +143,13 @@ export async function getMobileDashboard(userId) {
         },
       });
   if (todayLeave) {
-    todayStatus = { date: today, status: "onLeave" };
+    todayStatus = {
+      date: today,
+      status: "onLeave",
+      workMode: todayWorkMode,
+      todayPlan: todaySummary?.todayPlan ?? null,
+      report: todaySummary?.report ?? null,
+    };
   }
 
   // Month summary through yesterday
