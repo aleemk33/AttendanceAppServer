@@ -11,7 +11,10 @@ import {
   haversineMeters,
 } from "../../common/index.js";
 import { upsertSummaryFromPunch } from "./attendance-summary.service.js";
-import { getHolidaysInRange, buildHolidayDateMap } from "./attendance.helpers.js";
+import {
+  getHolidaysInRange,
+  buildHolidayDateMap,
+} from "./attendance.helpers.js";
 import { isWorkFromHomeDay } from "../work-from-home/work-from-home.service.js";
 
 /**
@@ -78,7 +81,6 @@ export async function punchIn(userId, payload, deviceId) {
         "Latitude and longitude are required for office punch-in",
       );
     }
-
     // Geofence check
     if (
       profile.officeLatitude == null ||
@@ -139,7 +141,8 @@ export async function punchIn(userId, payload, deviceId) {
  * Punch-out for current business date.
  * Requires existing punch-in and same bound device.
  */
-export async function punchOut(userId, deviceId, report) {
+export async function punchOut(userId, deviceId, payload) {
+  const { latitude, longitude, report } = payload;
   const prisma = getPrisma();
   const today = businessToday();
 
@@ -170,6 +173,32 @@ export async function punchOut(userId, deviceId, report) {
       throw new BadRequestError("Report is required for WFH punch-out");
     }
 
+    if (punch.workMode === WorkMode.OFFICE) {
+      if (latitude == null || longitude == null) {
+        throw new BadRequestError(
+          "Latitude and longitude are required for office punch-in",
+        );
+      }
+      // Geofence check
+      if (
+        profile.officeLatitude == null ||
+        profile.officeLongitude == null ||
+        profile.officeRadiusMeters == null
+      ) {
+        throw new BadRequestError("Attendance profile geofence not configured");
+      }
+      const distance = haversineMeters(
+        Number(profile.officeLatitude),
+        Number(profile.officeLongitude),
+        latitude,
+        longitude,
+      );
+      if (distance > profile.officeRadiusMeters) {
+        throw new BadRequestError(
+          `You are ${Math.round(distance)}m from office. Max allowed: ${profile.officeRadiusMeters}m`,
+        );
+      }
+    }
     const now = new Date();
     const workedMinutes = Math.floor(
       (now.getTime() - punch.punchInAt.getTime()) / 60000,
