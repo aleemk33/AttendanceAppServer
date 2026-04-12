@@ -7,7 +7,13 @@ import {
 } from "@prisma/client";
 import { getPrisma } from "../../config/database.js";
 import { env } from "../../config/env.js";
-import { isToday, isWeeklyOff, dateRange, toDateString } from "../../common/index.js";
+import {
+  isToday,
+  isWeeklyOff,
+  dateRange,
+  intersectDateRanges,
+  toDateString,
+} from "../../common/index.js";
 import { getHolidayDatesInRange } from "../holidays/holidays.helpers.js";
 
 // Keep parity with the current server behavior: LEAVE > REGULARIZATION > PUNCH.
@@ -222,14 +228,28 @@ function buildSummaryRows({
   regularizations,
   approvedLeaves,
   holidayDates,
+  rangeStart = null,
+  rangeEnd = null,
 }) {
   const summaryInputs = new Map();
+  const isInRequestedRange = (date) => {
+    if (rangeStart && date < rangeStart) {
+      return false;
+    }
+    if (rangeEnd && date > rangeEnd) {
+      return false;
+    }
+    return true;
+  };
 
   for (const punch of punches) {
     if (!punch.punchInAt && !punch.punchOutAt) {
       continue;
     }
     const date = toDateString(punch.attendanceDate);
+    if (!isInRequestedRange(date)) {
+      continue;
+    }
     const key = buildSummaryKey(punch.userId, date);
     const existing = summaryInputs.get(key) ?? {};
     summaryInputs.set(key, { ...existing, userId: punch.userId, date, punch });
@@ -237,6 +257,9 @@ function buildSummaryRows({
 
   for (const regularization of regularizations) {
     const date = toDateString(regularization.attendanceDate);
+    if (!isInRequestedRange(date)) {
+      continue;
+    }
     const key = buildSummaryKey(regularization.userId, date);
     const existing = summaryInputs.get(key) ?? {};
     summaryInputs.set(key, {
@@ -248,9 +271,21 @@ function buildSummaryRows({
   }
 
   for (const leave of approvedLeaves) {
+    const overlappingRange =
+      rangeStart && rangeEnd
+        ? intersectDateRanges(leave.startDate, leave.endDate, rangeStart, rangeEnd)
+        : {
+          startDate: toDateString(leave.startDate),
+          endDate: toDateString(leave.endDate),
+        };
+
+    if (!overlappingRange) {
+      continue;
+    }
+
     const leaveDates = dateRange(
-      toDateString(leave.startDate),
-      toDateString(leave.endDate),
+      overlappingRange.startDate,
+      overlappingRange.endDate,
     );
 
     for (const date of leaveDates) {
@@ -270,6 +305,9 @@ function buildSummaryRows({
 
   const rows = [];
   for (const input of summaryInputs.values()) {
+    if (!isInRequestedRange(input.date)) {
+      continue;
+    }
     if (isWeeklyOff(input.date) || holidayDates.has(input.date)) {
       continue;
     }
@@ -379,6 +417,8 @@ async function buildRangeSummaryRows(
     regularizations,
     approvedLeaves,
     holidayDates,
+    rangeStart: start,
+    rangeEnd: end,
   }).filter((row) => userIds.includes(row.userId));
 
   return { start, end, userIds, rows };

@@ -66,6 +66,36 @@ export function dateRange(startDate, endDate) {
   return dates;
 }
 /**
+ * Return the inclusive overlap between two date ranges.
+ * Accepts either Date objects or YYYY-MM-DD strings.
+ */
+export function intersectDateRanges(
+  firstStartDate,
+  firstEndDate,
+  secondStartDate,
+  secondEndDate,
+) {
+  const normalizedFirstStartDate = toDateString(firstStartDate);
+  const normalizedFirstEndDate = toDateString(firstEndDate);
+  const normalizedSecondStartDate = toDateString(secondStartDate);
+  const normalizedSecondEndDate = toDateString(secondEndDate);
+
+  const startDate =
+    normalizedFirstStartDate > normalizedSecondStartDate
+      ? normalizedFirstStartDate
+      : normalizedSecondStartDate;
+  const endDate =
+    normalizedFirstEndDate < normalizedSecondEndDate
+      ? normalizedFirstEndDate
+      : normalizedSecondEndDate;
+
+  if (startDate > endDate) {
+    return null;
+  }
+
+  return { startDate, endDate };
+}
+/**
  * Clamp an end date to yesterday if it's today or future.
  * Returns { appliedEndDate, currentDateExcluded }
  */

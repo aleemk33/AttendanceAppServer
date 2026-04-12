@@ -10,8 +10,8 @@ import {
   businessToday,
   countWorkingDays,
   dateRange,
+  intersectDateRanges,
   isWeeklyOff,
-  toDateString,
   buildManagerScopeUserWhere,
   assertDirectReportAccess,
 } from "../../common/index.js";
@@ -75,16 +75,20 @@ export async function createLeaveRequest(userId, data) {
   if (overlapping.length > 0) {
     // Check if any working days actually overlap
     for (const existing of overlapping) {
-      const existingDates = dateRange(
-        toDateString(existing.startDate),
-        toDateString(existing.endDate),
+      const overlappingRange = intersectDateRanges(
+        existing.startDate,
+        existing.endDate,
+        data.startDate,
+        data.endDate,
       );
+      if (!overlappingRange) {
+        continue;
+      }
 
-      const existingDatesInRange = existingDates.filter(
-        (d) => d >= data.startDate && d <= data.endDate,
-      );
-
-      const existingWorkingDates = existingDatesInRange.filter(
+      const existingWorkingDates = dateRange(
+        overlappingRange.startDate,
+        overlappingRange.endDate,
+      ).filter(
         (d) => !isWeeklyOff(d) && !holidayDates.has(d),
       );
 

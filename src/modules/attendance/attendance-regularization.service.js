@@ -10,6 +10,7 @@ import {
   rebuildSummaryForDate,
 } from "./attendance-summary.service.js";
 import { getHolidaysInRange, buildHolidayDateMap } from "./attendance.helpers.js";
+import { OverrideStatus } from "@prisma/client";
 
 /**
  * Creates or updates attendance regularization for a past working day.
@@ -58,7 +59,7 @@ export async function upsertRegularization(
     );
   }
 
-  if (["Absent", "Weekly Off", "On Leave"].includes(data.overrideStatus)) {
+  if ([OverrideStatus.ABSENT, OverrideStatus.WEEKLY_OFF, OverrideStatus.ON_LEAVE].includes(data.overrideStatus)) {
     data.overridePunchInAt = null;
     data.overridePunchOutAt = null;
     overrideWorkedMinutes = null;

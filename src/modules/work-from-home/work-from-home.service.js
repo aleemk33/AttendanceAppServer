@@ -4,6 +4,7 @@ import {
   buildManagerScopeWhere,
   businessToday,
   dateRange,
+  intersectDateRanges,
   isWeeklyOff,
   toDateString,
 } from "../../common/index.js";
@@ -36,13 +37,30 @@ function ensureFutureDatesOnly(dates, today) {
 }
 
 function buildLeaveConflictDates(selectedDates, approvedLeaves) {
+  if (selectedDates.length === 0) {
+    return [];
+  }
+
   const selectedDateSet = new Set(selectedDates);
   const conflicts = new Set();
+  const selectedStartDate = selectedDates[0];
+  const selectedEndDate = selectedDates[selectedDates.length - 1];
 
   for (const leave of approvedLeaves) {
+    const overlappingRange = intersectDateRanges(
+      leave.startDate,
+      leave.endDate,
+      selectedStartDate,
+      selectedEndDate,
+    );
+
+    if (!overlappingRange) {
+      continue;
+    }
+
     for (const date of dateRange(
-      toDateString(leave.startDate),
-      toDateString(leave.endDate),
+      overlappingRange.startDate,
+      overlappingRange.endDate,
     )) {
       if (selectedDateSet.has(date)) {
         conflicts.add(date);
