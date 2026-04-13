@@ -46,20 +46,25 @@ export async function getMobileDashboard(userId) {
     },
   });
 
-  const userCreatedDate = user?.createdAt
-    ? toDateString(user.createdAt)
-    : null;
+  const userCreatedDate = user?.createdAt ? toDateString(user.createdAt) : null;
 
   // Today's live status
   const [todaySummary, todayIsWorkFromHome] = await Promise.all([
     prisma.attendanceSummary.findUnique({
-      where: { userId_attendanceDate: { userId, attendanceDate: new Date(today) } },
+      where: {
+        userId_attendanceDate: { userId, attendanceDate: new Date(today) },
+      },
     }),
     isWorkFromHomeDay(userId, today, prisma),
   ]);
 
-  const todayWorkMode = todaySummary?.workMode ??
-    (todaySummary ? null : (todayIsWorkFromHome ? WorkMode.WFH : WorkMode.OFFICE));
+  const todayWorkMode =
+    todaySummary?.workMode ??
+    (todaySummary
+      ? null
+      : todayIsWorkFromHome
+        ? WorkMode.WFH
+        : WorkMode.OFFICE);
 
   let todayStatus = {
     date: today,
@@ -135,13 +140,13 @@ export async function getMobileDashboard(userId) {
     todaySummary?.status === AttendanceSummaryStatus.ON_LEAVE
       ? true
       : await prisma.leaveRequest.findFirst({
-        where: {
-          userId,
-          status: LeaveStatus.APPROVED,
-          startDate: { lte: new Date(today) },
-          endDate: { gte: new Date(today) },
-        },
-      });
+          where: {
+            userId,
+            status: LeaveStatus.APPROVED,
+            startDate: { lte: new Date(today) },
+            endDate: { gte: new Date(today) },
+          },
+        });
   if (todayLeave) {
     todayStatus = {
       date: today,
@@ -198,11 +203,21 @@ export async function getMobileDashboard(userId) {
     select: { id: true, title: true, startDate: true, endDate: true },
   });
 
+  // Upcoming 5 WFH days
+  const upcomingWFHDays = (
+    await prisma.WorkFromHomeDay.findMany({
+      where: { userId, attendanceDate: { gte: new Date(today) } },
+      orderBy: { attendanceDate: "asc" },
+      take: 5,
+    })
+  ).map((d) => toDateString(d.attendanceDate));
+  
   return {
     user,
     todayStatus,
     monthSummary,
     pendingLeaves,
     upcomingHolidays,
+    upcomingWFHDays
   };
 }
