@@ -2,7 +2,6 @@ import { LeaveStatus, AttendanceSummaryStatus, WorkMode } from "@prisma/client";
 import { getPrisma } from "../../config/database.js";
 import {
   businessToday,
-  businessYesterday,
   businessMonthStart,
   dateRange,
   isWeeklyOff,
@@ -30,7 +29,6 @@ import { isWorkFromHomeDay } from "../work-from-home/work-from-home.service.js";
 export async function getMobileDashboard(userId) {
   const prisma = getPrisma();
   const today = businessToday();
-  const yesterday = businessYesterday();
   const monthStart = businessMonthStart();
 
   // Basic profile card

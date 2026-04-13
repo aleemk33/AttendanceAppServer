@@ -141,7 +141,7 @@ export async function punchIn(userId, payload, deviceId) {
  * Punch-out for current business date.
  * Requires existing punch-in and same bound device.
  */
-export async function punchOut(userId, deviceId, payload) {
+export async function punchOut(userId, deviceId, payload = {}) {
   const { latitude, longitude, report } = payload;
   const prisma = getPrisma();
   const today = businessToday();
@@ -176,7 +176,7 @@ export async function punchOut(userId, deviceId, payload) {
     if (punch.workMode === WorkMode.OFFICE) {
       if (latitude == null || longitude == null) {
         throw new BadRequestError(
-          "Latitude and longitude are required for office punch-in",
+          "Latitude and longitude are required for office punch-out",
         );
       }
       // Geofence check

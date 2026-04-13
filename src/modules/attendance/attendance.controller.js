@@ -9,7 +9,7 @@ export async function punchIn(req, res) {
 
 export async function punchOut(req, res) {
     // Device ID is validated by requireDeviceId middleware
-    const punch = await attendanceService.punchOut(req.user.sub, req.deviceId, req.body?.report);
+    const punch = await attendanceService.punchOut(req.user.sub, req.deviceId, req.body ?? {});
     sendSuccess(res, punch, undefined, 'Punched out');
 }
 export async function myAttendanceOverview(req, res) {

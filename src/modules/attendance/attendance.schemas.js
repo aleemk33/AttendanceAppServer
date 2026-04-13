@@ -16,7 +16,12 @@ export const punchInSchema = z.object({
     message: 'latitude and longitude must be provided together',
 });
 export const punchOutSchema = z.object({
+    latitude: z.number().min(-90).max(90).optional(),
+    longitude: z.number().min(-180).max(180).optional(),
     report: optionalTrimmedString,
+}).refine((value) => (value.latitude == null) === (value.longitude == null), {
+    path: ['longitude'],
+    message: 'latitude and longitude must be provided together',
 }).default({});
 export const attendanceOverviewQuerySchema = z.object({
     startDate: dateOnlySchema.optional(),
