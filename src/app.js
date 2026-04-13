@@ -9,7 +9,7 @@ import { logger } from './config/logger.js';
 import { errorHandler } from './middlewares/error-handler.js';
 import mobileRoutes from './routes/mobile/index.js';
 import webRoutes from './routes/web/index.js';
-import { sendSuccess } from './common/response.js';
+import { sendError, sendSuccess } from './common/response.js';
 /**
  * Creates the full Express application with:
  * - cross-cutting middleware (security, compression, CORS, logging)
@@ -37,6 +37,14 @@ export function createApp() {
     // Keep portal routes isolated so auth/authorization policies can differ cleanly.
     app.use('/api/v1/mobile', mobileRoutes);
     app.use('/api/v1/web', webRoutes);
+    // Keep error payload shape consistent for unknown routes.
+    app.use((req, res, _next) => {
+        if (req.path.startsWith('/api/')) {
+            sendError(res, 404, 'ROUTE_NOT_FOUND', `Route ${req.method} ${req.originalUrl} not found`);
+            return;
+        }
+        sendError(res, 404, 'NOT_FOUND', 'Not found');
+    });
     // Must be the last middleware so it can catch downstream sync/async errors.
     app.use(errorHandler);
     return app;
