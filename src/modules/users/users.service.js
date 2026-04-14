@@ -10,6 +10,7 @@ import {
   isManagerScoped,
 } from "../../common/index.js";
 import { paginate, paginationMeta } from "../../common/pagination.js";
+import { env } from "../../config/env.js";
 // Business rule: ADMIN is exclusive and cannot be mixed with operational roles.
 const INVALID_ROLE_COMBOS = [
   [Role.EMPLOYEE, Role.ADMIN],
@@ -128,6 +129,13 @@ export async function createUser(callerRoles, callerId, data) {
       throw new BadRequestError("Invalid manager user ID");
     }
   }
+  //final check whether email is of companies domain
+  const emailDomain = data.email.split('@')[1];
+  if (emailDomain !== env().COMPANY_EMAIL_DOMAIN) {
+    throw new BadRequestError(`Email must be of domain ${env().COMPANY_EMAIL_DOMAIN}`);
+  }
+
+
   // Persist user first; profile follows to satisfy FK with generated user.id.
   const user = await prisma.user.create({
     data: {
