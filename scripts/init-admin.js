@@ -6,7 +6,7 @@ async function initAdmin() {
   console.log("Checking for admin user...");
 
   const existing = await prisma.user.findUnique({
-    where: { email: "aleem.khan@b2winfotech.ai" },
+    where: { email: "samiksha.bhuvad@b2winfotech.ai" },
   });
 
   if (existing) {
@@ -16,8 +16,8 @@ async function initAdmin() {
 
   const admin = await prisma.user.create({
     data: {
-      fullName: "Aleem Khan",
-      email: "aleem.khan@b2winfotech.ai",
+      fullName: "Samiksha Bhuvad",
+      email: "samiksha.bhuvad@b2winfotech.ai",
       roles: [Role.ADMIN],
       isActive: true,
     },
