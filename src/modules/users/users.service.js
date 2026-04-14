@@ -110,8 +110,8 @@ export async function createUser(callerRoles, callerId, data) {
   validateRoleCombination(data.roles);
   // Manager bootstrap guard: they can only onboard employees under themselves.
   if (isManagerScoped(callerRoles)) {
-    if (data.roles.length !== 1 || !data.roles.includes(Role.EMPLOYEE)) {
-      throw new ForbiddenError("Managers can only create EMPLOYEE users");
+    if (data.roles.includes(Role.ADMIN)) {
+      throw new ForbiddenError("Managers can only create EMPLOYEE or MANAGER users");
     }
     data.managerUserId = callerId;
   }
