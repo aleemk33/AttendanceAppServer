@@ -131,7 +131,7 @@ export async function createUser(callerRoles, callerId, data) {
   }
   //final check whether email is of companies domain
   const emailDomain = data.email.split('@')[1];
-  if (emailDomain !== env().COMPANY_EMAIL_DOMAIN) {
+  if (emailDomain !== env().COMPANY_DOMAIN) {
     throw new BadRequestError(`Email must be of domain ${env().COMPANY_DOMAIN}`);
   }
 
