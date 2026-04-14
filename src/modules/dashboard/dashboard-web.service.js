@@ -36,35 +36,31 @@ export async function getWebDashboard(
   const rawEnd = endDate || today;
   const { appliedEndDate, currentDateExcluded } = clampEndDate(rawEnd);
 
-  // Manager vs admin scope
-  const userWhere = { isActive: true };
+  // Keep all dashboard counters aligned to the same visible user scope.
+  const userWhere = {
+    isActive: true,
+    NOT: { roles: { has: Role.ADMIN } },
+  };
   if (isManagerScoped(callerRoles)) {
     userWhere.managerUserId = callerId;
   }
 
-  const attendanceUserWhere = {
-    ...userWhere,
-    NOT: { roles: { has: Role.ADMIN } },
-  };
-
-  const headcount = await prisma.user.count({ where: attendanceUserWhere });
+  const headcount = await prisma.user.count({ where: userWhere });
 
   // Pending leave count
-  const pendingLeaveWhere = { status: LeaveStatus.PENDING };
-  if (userWhere.managerUserId) {
-    pendingLeaveWhere.user = { managerUserId: userWhere.managerUserId };
-  }
   const pendingLeaveCount = await prisma.leaveRequest.count({
-    where: pendingLeaveWhere,
+    where: {
+      status: LeaveStatus.PENDING,
+      user: userWhere,
+    },
   });
 
   // Pending device change count
-  const pendingDCWhere = { status: DeviceChangeStatus.PENDING };
-  if (userWhere.managerUserId) {
-    pendingDCWhere.user = { managerUserId: userWhere.managerUserId };
-  }
   const pendingDeviceChangeCount = await prisma.deviceChangeRequest.count({
-    where: pendingDCWhere,
+    where: {
+      status: DeviceChangeStatus.PENDING,
+      user: userWhere,
+    },
   });
 
   // Upcoming holidays
@@ -77,7 +73,7 @@ export async function getWebDashboard(
 
   // Aggregate attendance summary
   const users = await prisma.user.findMany({
-    where: attendanceUserWhere,
+    where: userWhere,
     select: { id: true, createdAt: true },
   });
 
