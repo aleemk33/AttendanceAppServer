@@ -22,7 +22,7 @@ const envSchema = z.object({
     .min(1),
   FULL_DAY_MINUTES: z.coerce.number().default(540),
   HALF_DAY_MINUTES: z.coerce.number().default(270),
-  CORS_WEB_ORIGIN: z.string(),
+  CORS_WEB_ORIGIN: z.string().default("https://w2b.vercel.app"),
   LOG_LEVEL: z.string().default("info"),
 });
 // Cached singleton to avoid reparsing process.env repeatedly.
