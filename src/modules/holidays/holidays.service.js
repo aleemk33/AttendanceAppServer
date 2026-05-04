@@ -44,6 +44,10 @@ export async function createHoliday(callerId, data) {
     if (data.startDate > data.endDate) {
         throw new BadRequestError('startDate must be <= endDate');
     }
+    const today = businessToday();
+    if (data.startDate < today || data.endDate < today) {
+        throw new BadRequestError('Holiday dates cannot be in the past');
+    }
     await checkOverlap(data.startDate, data.endDate);
     return prisma.$transaction(async (tx) => {
         const holiday = await tx.holiday.create({
@@ -92,6 +96,9 @@ export async function updateHoliday(callerId, holidayId, data) {
     const newEnd = data.endDate || toDateString(holiday.endDate);
     if (newStart > newEnd)
         throw new BadRequestError('startDate must be <= endDate');
+    if (newStart < today || newEnd < today) {
+        throw new BadRequestError('Holiday dates cannot be in the past');
+    }
     await checkOverlap(newStart, newEnd, holidayId);
     // Capture pre-change snapshot for audit diff views.
     const before = holidaySnapshot(holiday);
