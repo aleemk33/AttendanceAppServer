@@ -217,7 +217,10 @@ export async function getWebAttendanceOverview(callerRoles, callerId, filters) {
     attendancePercentage: 0,
   };
 
-  aggregate.attendancePercentage = (aggregate.totalWorkedMinutes / ((aggregate.presentDays + aggregate.halfDays + aggregate.absentDays) * FULL_DAY_MINUTES)) * 100;
+  const workingDays = aggregate.presentDays + aggregate.halfDays + aggregate.absentDays;
+  aggregate.attendancePercentage = workingDays > 0
+    ? Math.round((aggregate.totalWorkedMinutes / (workingDays * FULL_DAY_MINUTES)) * 10000) / 100
+    : 0;
 
   return {
     range: {
